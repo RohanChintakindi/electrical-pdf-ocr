@@ -26,7 +26,6 @@ const nextConfig = {
       "node_modules/pdfjs-dist/build/**",
       "node_modules/pdfjs-dist/image_decoders/**",
       "node_modules/pdfjs-dist/types/**",
-      "node_modules/pdfjs-dist/legacy/build/pdf.worker*",
       "node_modules/pdfjs-dist/node_modules/@napi-rs/canvas-win32-*/**",
       "node_modules/pdfjs-dist/node_modules/@napi-rs/canvas-darwin-*/**",
       "node_modules/pdfjs-dist/node_modules/@napi-rs/canvas-android-*/**",

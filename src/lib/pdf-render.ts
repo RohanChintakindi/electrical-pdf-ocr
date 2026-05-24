@@ -30,6 +30,9 @@ async function openDoc(pdfBytes: Uint8Array) {
     isEvalSupported: false,
     disableFontFace: true,
     useSystemFonts: false,
+    // On Vercel serverless the worker file isn't reachable; run inline.
+    disableWorker: true,
+    useWorkerFetch: false,
   });
   return task.promise;
 }
