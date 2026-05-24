@@ -1,18 +1,17 @@
 // Legend discovery worker. Writes to a dedicated jobs/X/legend.json blob so
 // it never races with orchestrator/finalize writes to the master result.json.
 //
-// Strategy: the "largest page" heuristic was unreliable (all pages are the
-// same dims on Jesse's PDF, so it picked page 1 = Notes instead of page 2 =
-// lighting plan with the actual legend). Now we render and ask Claude about
-// every page, then merge. Each call returns [] for non-legend pages, so
-// merging is safe.
+// Strategy: render every page at low DPI (or reuse the OCR worker's page
+// renders when they're already in Blob), ask Claude about each, merge.
+// Each call returns [] for non-legend pages, so merging is safe.
 import { getBytes } from "./blob";
 import { renderPdfPageLowRes } from "./pdf-render";
 import { inspectPdfLight } from "./pdf-inspect";
 import { discoverLegend, type LegendEntry } from "./claude-legend";
-import { writeLegend } from "./jobs";
+import { pageImageKey, writeLegend } from "./jobs";
 import { tryFinalize } from "./finalize";
 import { pMap } from "./concurrency";
+import sharp from "sharp";
 
 export interface ProcessLegendInput {
   jobId: string;
@@ -22,6 +21,34 @@ export interface ProcessLegendInput {
 const RENDER_CONCURRENCY = 2;
 const CLAUDE_CONCURRENCY = 4;
 
+/** Try to fetch an OCR-worker-rendered page PNG from Blob. Returns null if
+ * not yet written or not reachable. Saves us from re-rendering the page. */
+async function fetchOcrPageImage(jobId: string, pageNumber: number): Promise<Buffer | null> {
+  const { urlFor } = await import("./blob");
+  const url = urlFor(pageImageKey(jobId, pageNumber));
+  if (!url) return null;
+  try {
+    const r = await fetch(`${url}?v=${Date.now()}`, { cache: "no-store" });
+    if (!r.ok) return null;
+    return Buffer.from(await r.arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+
+async function downsizeForClaude(png: Buffer): Promise<{ png: Buffer; width: number; height: number }> {
+  const img = sharp(png);
+  const meta = await img.metadata();
+  const w = meta.width ?? 0;
+  const h = meta.height ?? 0;
+  const MAX = 3072;
+  if (Math.max(w, h) <= MAX) return { png, width: w, height: h };
+  const resize = w >= h ? { width: MAX } : { height: MAX };
+  const out = await img.resize({ ...resize, withoutEnlargement: true }).png().toBuffer();
+  const m2 = await sharp(out).metadata();
+  return { png: out, width: m2.width ?? 0, height: m2.height ?? 0 };
+}
+
 export async function processLegend({ jobId, pdfPath }: ProcessLegendInput): Promise<void> {
   try {
     const pdfBytes = await getBytes(pdfPath);
@@ -30,10 +57,18 @@ export async function processLegend({ jobId, pdfPath }: ProcessLegendInput): Pro
     const { pageCount } = await inspectPdfLight(new Uint8Array(pdfBytes));
     const pageNumbers = Array.from({ length: pageCount }, (_, i) => i + 1);
 
-    // Low-DPI is fine for Claude vision — it's ~10x faster than the OCR render.
-    const rendered = await pMap(pageNumbers, RENDER_CONCURRENCY, (pn) =>
-      renderPdfPageLowRes(new Uint8Array(pdfBytes), pn).then((r) => ({ pn, ...r })),
-    );
+    // Try to reuse the OCR worker's already-rendered page PNGs. Only fall back
+    // to a low-DPI re-render if the OCR blob isn't there yet (legend worker
+    // started before / faster than the corresponding page worker).
+    const rendered = await pMap(pageNumbers, RENDER_CONCURRENCY, async (pn) => {
+      const existing = await fetchOcrPageImage(jobId, pn);
+      if (existing) {
+        const r = await downsizeForClaude(existing);
+        return { pn, ...r };
+      }
+      const r = await renderPdfPageLowRes(new Uint8Array(pdfBytes), pn);
+      return { pn, ...r };
+    });
 
     const perPageCodes = await pMap(rendered, CLAUDE_CONCURRENCY, async (r) => {
       try {

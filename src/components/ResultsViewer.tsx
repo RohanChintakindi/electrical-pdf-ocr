@@ -103,6 +103,15 @@ export default function ResultsViewer({ initial }: Props) {
 
   const overallStatus = job.status;
 
+  const pagesDone = useMemo(() => job.pages.filter((p) => p.status === "done").length, [job.pages]);
+  const pagesTotal = job.pages.length || job.meta.totalPages || 0;
+  const isProcessing = overallStatus === "queued" || overallStatus === "processing";
+  // Phase estimate: pages are ~80% of wall time, legend + finalize the other 20%.
+  const pagePct = pagesTotal > 0 ? pagesDone / pagesTotal : 0;
+  const overallPct = isProcessing
+    ? Math.min(95, Math.round(pagePct * 80 + (pagesTotal > 0 && pagesDone === pagesTotal ? 15 : 0)))
+    : 100;
+
   return (
     <div className="h-screen flex flex-col bg-background">
       {/* Top bar */}
@@ -132,6 +141,28 @@ export default function ResultsViewer({ initial }: Props) {
           </button>
         </div>
       </header>
+
+      {/* Progress bar — visible while processing */}
+      {isProcessing && (
+        <div className="border-b border-border bg-background/80 shrink-0">
+          <div className="px-4 py-2 flex items-center gap-3 text-xs">
+            <Loader2 className="size-3.5 animate-spin text-primary shrink-0" />
+            <span className="font-medium text-muted-foreground shrink-0">
+              {overallStatus === "queued" ? "Starting workers…" : pagesDone === pagesTotal && pagesTotal > 0 ? "Finalizing…" : "Processing pages"}
+            </span>
+            <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+              <div
+                className="h-full bg-primary transition-all duration-500 ease-out"
+                style={{ width: `${overallPct}%` }}
+              />
+            </div>
+            <span className="tabular-nums text-muted-foreground shrink-0">
+              {pagesTotal > 0 ? `${pagesDone}/${pagesTotal} pages` : "…"}
+            </span>
+            <span className="tabular-nums text-primary shrink-0 w-9 text-right">{overallPct}%</span>
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 min-h-0 flex">
         {/* Viewer */}
