@@ -59,6 +59,14 @@ export interface PageJobResult {
   rawHits: RawHit[];
   errors?: string[];
   durationMs?: number;
+  /** Diagnostics: per-tile word count, errors. Optional. */
+  debug?: {
+    tileCount: number;
+    tilesWithWords: number;
+    totalWordsRaw: number;
+    sampleWords?: string[];
+    tileErrors?: string[];
+  };
 }
 
 export interface RawHit {

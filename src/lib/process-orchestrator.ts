@@ -4,6 +4,7 @@
 import { getBytes } from "./blob";
 import { inspectPdfLight } from "./pdf-inspect";
 import { readJob, writeJob } from "./jobs";
+import { tryFinalize } from "./finalize";
 import type { JobResult, PageResult } from "./types";
 
 export interface OrchestrateInput {
@@ -75,6 +76,12 @@ export async function orchestrate({ jobId, pdfName, pdfPath, baseUrl }: Orchestr
     }).catch((e) => console.error("[orchestrator] legend kickoff failed:", e.message)),
   );
   await Promise.all(tasks);
+
+  // Defensive: workers each call tryFinalize after their write, but if the
+  // last one was killed mid-call (hitting the 60s function cap) finalize
+  // never runs. Now that all worker fetches have returned, the orchestrator
+  // does the final flush itself.
+  await tryFinalize(jobId);
 
   return { totalPages: pageCount };
 }

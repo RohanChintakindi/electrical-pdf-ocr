@@ -29,15 +29,19 @@ export async function processOnePage({ jobId, pageNumber, pdfPath }: ProcessPage
     const writtenImg = await putBytes(pageImageKey(jobId, pageNumber), rp.png, "image/png");
 
     const tiles = await tilePage(rp.png, rp.width, rp.height);
+    const tileErrors: string[] = [];
     const tileHits = await pMap(tiles, MAX_TILES_IN_FLIGHT, async (t) => {
       try {
         return await ocrTile(t.png, t.x, t.y);
       } catch (e: any) {
-        console.error(`[ocr] page ${pageNumber} tile ${t.x},${t.y} failed:`, e.message);
+        const msg = `tile@${t.x},${t.y}: ${e.message ?? e}`;
+        console.error(`[ocr] page ${pageNumber} ${msg}`);
+        if (tileErrors.length < 5) tileErrors.push(msg);
         return [] as RawHit[];
       }
     });
     const allRaw: RawHit[] = tileHits.flat();
+    const tilesWithWords = tileHits.filter((h) => h.length > 0).length;
     const merged = mergeAdjacentSuffixes(allRaw);
     const deduped = dedupeOverlaps(merged);
 
@@ -50,6 +54,13 @@ export async function processOnePage({ jobId, pageNumber, pdfPath }: ProcessPage
       status: "done",
       rawHits: deduped,
       durationMs: Date.now() - started,
+      debug: {
+        tileCount: tiles.length,
+        tilesWithWords,
+        totalWordsRaw: allRaw.length,
+        sampleWords: allRaw.slice(0, 10).map((h) => h.code),
+        tileErrors,
+      },
     });
   } catch (e: any) {
     console.error(`[process-page] page ${pageNumber} failed:`, e);
