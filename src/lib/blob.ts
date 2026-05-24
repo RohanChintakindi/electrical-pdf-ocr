@@ -9,6 +9,23 @@ function isLocal(): boolean {
   return !process.env.BLOB_READ_WRITE_TOKEN;
 }
 
+// Vercel Blob tokens are `vercel_blob_rw_<storeId>_<secret>`. Construct the
+// public CDN URL ourselves instead of relying on list(), which is eventually
+// consistent and frequently misses recently-written blobs. Public blobs are
+// served at `https://<storeId>.public.blob.vercel-storage.com/<pathname>`.
+function publicBlobBase(): string | null {
+  const tok = process.env.BLOB_READ_WRITE_TOKEN;
+  if (!tok) return null;
+  const m = tok.match(/^vercel_blob_rw_([^_]+)_/);
+  if (!m) return null;
+  return `https://${m[1].toLowerCase()}.public.blob.vercel-storage.com`;
+}
+
+function publicUrlFor(pathname: string): string | null {
+  const base = publicBlobBase();
+  return base ? `${base}/${pathname}` : null;
+}
+
 async function ensureLocalDir(p: string) {
   await fs.mkdir(path.dirname(p), { recursive: true });
 }
@@ -48,13 +65,10 @@ export async function getJson<T>(pathname: string): Promise<T | null> {
       return null;
     }
   }
-  const { list } = await import("@vercel/blob");
-  // result.json is overwritten each time → cache-buster via random suffix would
-  // bloat the index. We just list newest-first and pick the matching pathname.
-  const { blobs } = await list({ prefix: pathname, limit: 10 });
-  const match = blobs.find((b) => b.pathname === pathname);
-  if (!match) return null;
-  const resp = await fetch(match.url, { cache: "no-store" });
+  const url = publicUrlFor(pathname);
+  if (!url) return null;
+  // ?v=ts bypasses the Blob CDN cache so writers see their own latest writes
+  const resp = await fetch(`${url}?v=${Date.now()}`, { cache: "no-store" });
   if (!resp.ok) return null;
   return (await resp.json()) as T;
 }
@@ -74,20 +88,16 @@ export async function getBytes(pathnameOrUrl: string): Promise<Buffer | null> {
       return null;
     }
   }
-  const { list } = await import("@vercel/blob");
-  const { blobs } = await list({ prefix: pathnameOrUrl, limit: 1 });
-  const match = blobs.find((b) => b.pathname === pathnameOrUrl);
-  if (!match) return null;
-  const resp = await fetch(match.url, { cache: "no-store" });
+  const url = publicUrlFor(pathnameOrUrl);
+  if (!url) return null;
+  const resp = await fetch(`${url}?v=${Date.now()}`, { cache: "no-store" });
   if (!resp.ok) return null;
   return Buffer.from(await resp.arrayBuffer());
 }
 
 export function urlFor(pathname: string): string {
   if (isLocal()) return `/api/blob/${pathname}`;
-  // For Vercel Blob, we need to look up the URL when we wrote it.
-  // The PageResult.imageUrl is set at write time, so this fallback isn't usually hit.
-  return pathname;
+  return publicUrlFor(pathname) ?? pathname;
 }
 
 export function localBlobRoot() {
