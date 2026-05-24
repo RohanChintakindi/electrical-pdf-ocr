@@ -2,7 +2,7 @@
 // merge their outputs into the master result.json with the final code rollup.
 // Multiple workers may call this concurrently; the write is idempotent so the
 // last write wins with the same content.
-import { readJob, readPageJob, writeJob } from "./jobs";
+import { readJob, readLegend, readPageJob, writeJob } from "./jobs";
 import { filterByLegend } from "./dedupe";
 import { colorForCode } from "./colors";
 import type { CodeEntry, JobResult, PageResult } from "./types";
@@ -29,14 +29,15 @@ export async function tryFinalize(jobId: string): Promise<void> {
   if (totalPages <= 0) return;
 
   // Need every per-page blob settled + legend resolved
-  const pageJobs = await Promise.all(
-    Array.from({ length: totalPages }, (_, i) => readPageJob(jobId, i + 1)),
-  );
+  const [pageJobs, legend] = await Promise.all([
+    Promise.all(Array.from({ length: totalPages }, (_, i) => readPageJob(jobId, i + 1))),
+    readLegend(jobId),
+  ]);
   const allPagesSettled = pageJobs.every((pj) => pj !== null);
-  const legendReady = job.legendStatus === "done" || job.legendStatus === "error";
+  const legendReady = legend !== null;
   if (!allPagesSettled || !legendReady) return;
 
-  const legendCodes = (job.legend ?? []).map((l) => l.code);
+  const legendCodes = legend.codes.map((l) => l.code);
   const merged: PageResult[] = pageJobs.map((pj, i) => {
     const stub = job.pages[i];
     if (!pj) return stub;
@@ -57,7 +58,7 @@ export async function tryFinalize(jobId: string): Promise<void> {
       counts.set(inst.code, (counts.get(inst.code) ?? 0) + 1);
     }
   }
-  const descByCode = new Map((job.legend ?? []).map((l) => [l.code.toUpperCase(), l.description] as const));
+  const descByCode = new Map(legend.codes.map((l) => [l.code.toUpperCase(), l.description] as const));
   const codes: CodeEntry[] = [...counts.entries()]
     .sort((a, b) => smartSort(a[0], b[0]))
     .map(([code, count]) => ({
@@ -71,6 +72,8 @@ export async function tryFinalize(jobId: string): Promise<void> {
     ...job,
     pages: merged,
     codes,
+    legend: legend.codes,
+    legendStatus: legend.status,
     meta: {
       ...job.meta,
       totalHits: codes.reduce((s, c) => s + c.count, 0),

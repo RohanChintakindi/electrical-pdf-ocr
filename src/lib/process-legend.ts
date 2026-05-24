@@ -1,11 +1,10 @@
-// Legend discovery worker: render the largest page (heuristically the lighting
-// plan) and ask Claude to read the legend. Updates the master job with the
-// legend, then attempts finalize.
+// Legend discovery worker. Writes to a dedicated jobs/X/legend.json blob so
+// it never races with orchestrator/finalize writes to the master result.json.
 import { getBytes } from "./blob";
 import { renderPdfPage } from "./pdf-render";
 import { inspectPdfLight } from "./pdf-inspect";
 import { discoverLegend } from "./claude-legend";
-import { readJob, writeJob } from "./jobs";
+import { writeLegend } from "./jobs";
 import { tryFinalize } from "./finalize";
 
 export interface ProcessLegendInput {
@@ -20,23 +19,13 @@ export async function processLegend({ jobId, pdfPath }: ProcessLegendInput): Pro
 
     const { largestPage } = await inspectPdfLight(new Uint8Array(pdfBytes));
     const rendered = await renderPdfPage(new Uint8Array(pdfBytes), largestPage);
-    const legend = await discoverLegend(rendered.png, rendered.width, rendered.height);
-    console.log(`[legend] discovered ${legend.length} codes`);
+    const codes = await discoverLegend(rendered.png, rendered.width, rendered.height);
+    console.log(`[legend] discovered ${codes.length} codes`);
 
-    const job = await readJob(jobId);
-    if (job) {
-      job.legend = legend;
-      job.legendStatus = "done";
-      await writeJob(job);
-    }
+    await writeLegend(jobId, { status: "done", codes });
   } catch (e: any) {
     console.error("[legend] failure, finalizing with regex-only filter:", e);
-    const job = await readJob(jobId);
-    if (job) {
-      job.legend = [];
-      job.legendStatus = "error";
-      await writeJob(job);
-    }
+    await writeLegend(jobId, { status: "error", codes: [], error: e.message });
   }
   await tryFinalize(jobId);
 }

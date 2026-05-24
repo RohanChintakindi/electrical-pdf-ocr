@@ -35,3 +35,21 @@ export async function readPageJob(jobId: string, pageNumber: number): Promise<Pa
 export async function writePageJob(pj: PageJobResult): Promise<void> {
   await putJson(pageJobKey(pj.jobId, pj.pageNumber), pj);
 }
+
+export interface LegendResult {
+  status: "done" | "error";
+  codes: { code: string; description: string }[];
+  error?: string;
+}
+
+export function legendKey(jobId: string) {
+  return `jobs/${jobId}/legend.json`;
+}
+
+export async function readLegend(jobId: string): Promise<LegendResult | null> {
+  return getJson<LegendResult>(legendKey(jobId));
+}
+
+export async function writeLegend(jobId: string, lr: LegendResult): Promise<void> {
+  await putJson(legendKey(jobId), lr);
+}
