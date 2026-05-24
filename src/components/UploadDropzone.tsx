@@ -63,21 +63,31 @@ export default function UploadDropzone() {
     try {
       const useBlob = blobMode ?? await detectBlobMode();
       let jobId: string;
+      let pdfPath: string;
       if (useBlob) {
         jobId = uuid();
         const pathname = `jobs/${jobId}/source.pdf`;
-        await upload(pathname, file, {
+        const blob = await upload(pathname, file, {
           access: "public",
           handleUploadUrl: "/api/upload",
           contentType: "application/pdf",
           clientPayload: JSON.stringify({ jobId, pdfName: file.name }),
           onUploadProgress: (e) => setProgress(e.percentage),
         });
+        pdfPath = blob.url;
+        // Kick off processing from the browser — a fetch inside the upload
+        // serverless function gets killed when the function exits.
+        fetch("/api/process", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jobId, pdfName: file.name, pdfPath }),
+          keepalive: true,
+        }).catch(() => {});
       } else {
         const form = new FormData();
         form.append("file", file);
         const xhr = new XMLHttpRequest();
-        const done = new Promise<{ jobId: string }>((resolve, reject) => {
+        const done = new Promise<{ jobId: string; pdfPath: string }>((resolve, reject) => {
           xhr.upload.addEventListener("progress", (e) => {
             if (e.lengthComputable) setProgress((e.loaded / e.total) * 100);
           });
@@ -94,6 +104,14 @@ export default function UploadDropzone() {
         });
         const r = await done;
         jobId = r.jobId;
+        pdfPath = r.pdfPath;
+        // Local dev: kick off processing from the browser too, for parity
+        fetch("/api/process", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jobId, pdfName: file.name, pdfPath }),
+          keepalive: true,
+        }).catch(() => {});
       }
       pushRecent({ jobId, pdfName: file.name, uploadedAt: new Date().toISOString() });
       setRecent(loadRecent());

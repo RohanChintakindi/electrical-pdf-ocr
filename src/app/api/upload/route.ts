@@ -15,14 +15,6 @@ export const maxDuration = 60;
 
 const MAX_BYTES = 50 * 1024 * 1024;
 
-async function kickoffProcess(origin: string, jobId: string, pdfName: string, pdfPath: string) {
-  fetch(`${origin}/api/process`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jobId, pdfName, pdfPath }),
-  }).catch((e) => console.error("[upload] kickoff fetch failed:", e));
-}
-
 async function writeStub(jobId: string, pdfName: string, pdfPath: string) {
   const stub: JobResult = {
     jobId,
@@ -64,8 +56,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           try {
             const { jobId, pdfName } = JSON.parse(tokenPayload ?? "{}") as { jobId: string; pdfName: string };
             await writeStub(jobId, pdfName, blob.url);
-            const origin = req.nextUrl.origin;
-            kickoffProcess(origin, jobId, pdfName, blob.url);
+            // The browser kicks off /api/process after this — fire-and-forget
+            // from inside a serverless function gets killed when the function
+            // exits.
           } catch (e) {
             console.error("[upload] onUploadCompleted failed:", e);
           }
@@ -91,8 +84,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const pdfPathname = `jobs/${jobId}/source.pdf`;
     await putBytes(pdfPathname, buf, "application/pdf");
     await writeStub(jobId, file.name, pdfPathname);
-    kickoffProcess(req.nextUrl.origin, jobId, file.name, pdfPathname);
-    return NextResponse.json({ jobId }, { status: 200 });
+    // Browser kicks off /api/process — fire-and-forget from a serverless
+    // function gets killed when the function exits.
+    return NextResponse.json({ jobId, pdfPath: pdfPathname, pdfName: file.name }, { status: 200 });
   } catch (e: any) {
     console.error("[upload] error:", e);
     return NextResponse.json({ error: e.message }, { status: 500 });
