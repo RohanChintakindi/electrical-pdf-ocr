@@ -55,7 +55,9 @@ export interface PageJobResult {
   width: number;
   height: number;
   imageUrl: string;
-  status: "done" | "error";
+  /** "processing" is an interim stub the worker writes on entry so the UI
+   *  can show progress. Final write is "done" or "error". */
+  status: "processing" | "done" | "error";
   rawHits: RawHit[];
   errors?: string[];
   durationMs?: number;

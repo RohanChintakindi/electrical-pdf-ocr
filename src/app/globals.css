@@ -4,31 +4,112 @@
 
 @layer base {
   :root {
-    --background: 220 14% 6%;
-    --foreground: 210 20% 96%;
-    --muted: 220 14% 12%;
-    --muted-foreground: 215 14% 65%;
-    --border: 220 14% 18%;
-    --accent: 220 14% 14%;
-    --accent-foreground: 210 20% 96%;
-    --primary: 198 93% 60%;
-    --primary-foreground: 220 14% 8%;
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 210 20% 98%;
-    --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
-    --font-mono: ui-monospace, "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
+    /* Drafting-table palette: warm ink, paper-cream type, amber + cyan accents. */
+    --background: 30 8% 5%;            /* paper-ink near-black, warm */
+    --surface: 30 7% 8%;               /* raised plate */
+    --surface-2: 30 6% 11%;            /* hover/active plate */
+    --foreground: 38 25% 92%;          /* paper cream */
+    --muted: 30 6% 10%;
+    --muted-foreground: 32 8% 56%;     /* pencil-graphite */
+    --border: 30 8% 17%;
+    --border-strong: 32 10% 25%;
+    --accent: 30 6% 13%;
+    --accent-foreground: 38 25% 92%;
+    /* Drafting amber — engineering marker, brass plate, electrical warning */
+    --primary: 38 95% 58%;
+    --primary-foreground: 30 25% 8%;
+    /* Blueprint cyan — data, active state, secondary accent */
+    --info: 200 92% 62%;
+    --destructive: 4 78% 60%;
+    --destructive-foreground: 38 25% 96%;
+    --success: 145 55% 55%;
+
+    --shadow-plate: 0 1px 0 hsl(0 0% 100% / 0.04), 0 12px 32px -8px hsl(0 0% 0% / 0.55);
   }
   html, body {
     background: hsl(var(--background));
     color: hsl(var(--foreground));
-    font-family: var(--font-sans);
+    font-family: var(--font-sans), system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: "ss01", "ss02", "cv01", "cv11";
   }
   * { border-color: hsl(var(--border)); }
+
+  /* Selection feels like marker highlight */
+  ::selection {
+    background: hsl(var(--primary) / 0.35);
+    color: hsl(var(--foreground));
+  }
 }
 
 @layer utilities {
   .scrollbar-thin::-webkit-scrollbar { width: 8px; height: 8px; }
-  .scrollbar-thin::-webkit-scrollbar-track { background: hsl(var(--muted)); }
-  .scrollbar-thin::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 4px; }
-  .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground)); }
+  .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: hsl(var(--border-strong));
+    border-radius: 999px;
+    border: 2px solid hsl(var(--background));
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / 0.7); }
+
+  /* Drafting grid background — faint cross-hatch like vellum */
+  .bg-draft-grid {
+    background-image:
+      linear-gradient(to right,  hsl(var(--border) / 0.55) 1px, transparent 1px),
+      linear-gradient(to bottom, hsl(var(--border) / 0.55) 1px, transparent 1px),
+      linear-gradient(to right,  hsl(var(--border) / 0.22) 1px, transparent 1px),
+      linear-gradient(to bottom, hsl(var(--border) / 0.22) 1px, transparent 1px);
+    background-size: 96px 96px, 96px 96px, 16px 16px, 16px 16px;
+    background-position: -1px -1px;
+  }
+
+  /* Subtle vignette + amber glow for hero atmosphere */
+  .bg-hero-glow {
+    background:
+      radial-gradient(60% 50% at 50% -10%, hsl(var(--primary) / 0.10), transparent 70%),
+      radial-gradient(80% 60% at 50% 110%, hsl(var(--info) / 0.06), transparent 70%);
+  }
+
+  /* Dimension line — used as a decorative divider */
+  .dim-line {
+    --color: hsl(var(--border-strong));
+    background-image: linear-gradient(to right, var(--color) 0 100%);
+    background-size: 100% 1px;
+    background-repeat: no-repeat;
+    background-position: center;
+    position: relative;
+  }
+  .dim-line::before,
+  .dim-line::after {
+    content: "";
+    position: absolute; top: 50%;
+    width: 1px; height: 10px;
+    background: var(--color);
+    transform: translateY(-50%);
+  }
+  .dim-line::before { left: 0; }
+  .dim-line::after  { right: 0; }
+
+  /* Tabular numerics + slashed zero everywhere we count things */
+  .num {
+    font-variant-numeric: tabular-nums slashed-zero;
+    font-feature-settings: "tnum", "zero";
+  }
+
+  /* Animation for the crosshair beat */
+  @keyframes pulse-soft { 0%, 100% { opacity: 0.7; } 50% { opacity: 1; } }
+  .animate-pulse-soft { animation: pulse-soft 2.4s ease-in-out infinite; }
+
+  @keyframes scanline {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+  .scanline::after {
+    content: "";
+    position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent, hsl(var(--primary) / 0.18), transparent);
+    pointer-events: none;
+    animation: scanline 2.4s linear infinite;
+  }
 }

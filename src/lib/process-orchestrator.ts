@@ -4,7 +4,6 @@
 import { getBytes } from "./blob";
 import { inspectPdfLight } from "./pdf-inspect";
 import { readJob, writeJob } from "./jobs";
-import { tryFinalize } from "./finalize";
 import type { JobResult, PageResult } from "./types";
 
 export interface OrchestrateInput {
@@ -77,11 +76,16 @@ export async function orchestrate({ jobId, pdfName, pdfPath, baseUrl }: Orchestr
   );
   await Promise.all(tasks);
 
-  // Defensive: workers each call tryFinalize after their write, but if the
-  // last one was killed mid-call (hitting the 60s function cap) finalize
-  // never runs. Now that all worker fetches have returned, the orchestrator
-  // does the final flush itself.
-  await tryFinalize(jobId);
+  // Workers each call tryFinalize after their write, but the LAST caller is
+  // typically out of time when it hits the master write. Fire a fresh
+  // /api/finalize invocation (its own 60s budget) and don't wait for it —
+  // the polling endpoint also lazy-finalizes as a safety net.
+  fetch(`${base}/api/finalize`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ jobId }),
+    keepalive: true,
+  }).catch((e) => console.error("[orchestrator] finalize kickoff failed:", e.message));
 
   return { totalPages: pageCount };
 }

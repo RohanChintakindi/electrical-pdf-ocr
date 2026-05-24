@@ -15,7 +15,9 @@ export interface RenderedPage {
   png: Buffer;
 }
 
-const DPI = 500;
+// 400 DPI: enough to OCR the smallest fixture-code text on Jesse's drawing
+// without the render cost of 500. Drops ~30% off render time per page.
+const DPI = 400;
 const PDF_POINTS_PER_INCH = 72;
 const SCALE = DPI / PDF_POINTS_PER_INCH;
 

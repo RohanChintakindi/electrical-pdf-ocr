@@ -33,7 +33,9 @@ export async function tryFinalize(jobId: string): Promise<void> {
     Promise.all(Array.from({ length: totalPages }, (_, i) => readPageJob(jobId, i + 1))),
     readLegend(jobId),
   ]);
-  const allPagesSettled = pageJobs.every((pj) => pj !== null);
+  // A page blob now also exists in "processing" state (interim stub for UI
+  // progress). Only treat done/error as actually settled.
+  const allPagesSettled = pageJobs.every((pj) => pj !== null && (pj.status === "done" || pj.status === "error"));
   const legendReady = legend !== null;
   if (!allPagesSettled || !legendReady) return;
 

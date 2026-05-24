@@ -30,7 +30,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ jobId: 
   // it tends to die at the 60s function cap before the master write lands.
   // This polling endpoint is a fresh invocation with its own budget, so
   // call tryFinalize here when conditions are met. It's idempotent.
-  const allPagesSettled = overlays.every((pj) => pj !== null);
+  // Worker writes a "processing" stub on entry so the UI sees progress.
+  // Only done/error count as settled for the finalize trigger.
+  const allPagesSettled = overlays.every((pj) => pj !== null && (pj.status === "done" || pj.status === "error"));
   if (allPagesSettled) {
     // If pages are done but legend never showed, give it a deadline then
     // synthesize an empty legend so finalize can complete (regex-only filter).

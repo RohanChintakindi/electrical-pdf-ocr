@@ -10,7 +10,7 @@ import { pageImageKey, writePageJob } from "./jobs";
 import { tryFinalize } from "./finalize";
 import type { RawHit } from "./types";
 
-const MAX_TILES_IN_FLIGHT = 5;
+const MAX_TILES_IN_FLIGHT = 8;
 
 export interface ProcessPageInput {
   jobId: string;
@@ -20,6 +20,18 @@ export interface ProcessPageInput {
 
 export async function processOnePage({ jobId, pageNumber, pdfPath }: ProcessPageInput): Promise<void> {
   const started = Date.now();
+  // Write an interim "processing" stub the moment we start, so the polling
+  // UI can show a moving progress bar instead of waiting for the (final)
+  // "done" write at the very end of the worker.
+  await writePageJob({
+    jobId,
+    pageNumber,
+    width: 0,
+    height: 0,
+    imageUrl: "",
+    status: "processing",
+    rawHits: [],
+  });
   try {
     ensureCredsFileFromEnv();
     const pdfBytes = await getBytes(pdfPath);
