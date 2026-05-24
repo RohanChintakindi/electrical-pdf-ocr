@@ -221,11 +221,22 @@ export default function ResultsViewer({ initial }: Props) {
               <IconBtn onClick={() => zoomRef.current?.resetTransform()} title="Fit (F)"><Maximize2 className="size-3.5" /></IconBtn>
             </div>
 
-            {/* Drawing meta — bottom-left overlay */}
+            {/* Drawing meta — bottom-left overlay. Instances only show once
+                finalize has merged the legend filter; before that the page's
+                raw hits are sitting in its own blob but haven't been counted. */}
             {page && page.status === "done" && (
               <div className="absolute left-3 bottom-3 z-10 bg-surface/90 backdrop-blur border border-border rounded-sm px-3 py-2 font-mono text-[10px] uppercase tracking-wider2 text-muted-foreground">
-                <span className="text-foreground num">{page.instances.length.toString().padStart(3, "0")}</span> instances
-                <span className="mx-2 text-border-strong">·</span>
+                {!isProcessing ? (
+                  <>
+                    <span className="text-foreground num">{page.instances.length.toString().padStart(3, "0")}</span> instances
+                    <span className="mx-2 text-border-strong">·</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-muted-foreground/60">awaiting merge</span>
+                    <span className="mx-2 text-border-strong">·</span>
+                  </>
+                )}
                 <span className="num">{page.width}×{page.height}</span>
               </div>
             )}
@@ -263,9 +274,15 @@ export default function ResultsViewer({ initial }: Props) {
             <div className="flex items-baseline justify-between">
               <h2 className="font-display text-lg text-foreground">Schedule</h2>
               <span className="font-mono text-[10px] uppercase tracking-wider2 text-muted-foreground num">
-                <span className="text-foreground">{job.meta.totalHits.toString().padStart(3, "0")}</span> hits
-                <span className="mx-1 text-border-strong">·</span>
-                <span className="text-foreground">{job.codes.length.toString().padStart(2, "0")}</span> unique
+                {isProcessing && job.codes.length === 0 ? (
+                  <span className="text-muted-foreground/60">— pending —</span>
+                ) : (
+                  <>
+                    <span className="text-foreground">{job.meta.totalHits.toString().padStart(3, "0")}</span> hits
+                    <span className="mx-1 text-border-strong">·</span>
+                    <span className="text-foreground">{job.codes.length.toString().padStart(2, "0")}</span> unique
+                  </>
+                )}
               </span>
             </div>
             <div className="relative">
