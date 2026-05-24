@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { readJob } from "@/lib/process";
+import { readJob } from "@/lib/jobs";
 
 export const runtime = "nodejs";
 

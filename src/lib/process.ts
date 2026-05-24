@@ -4,8 +4,7 @@
 // 3. For each page (max 3 concurrent), tile → OCR each tile (max 5 concurrent) →
 //    merge adjacent suffixes → dedupe → filter by legend.
 // 4. Stream progress by re-writing the result JSON after each page completes.
-import { v4 as uuid } from "uuid";
-import { getBytes, putBytes, putJson, getJson } from "./blob";
+import { getBytes, putBytes } from "./blob";
 import { renderPdfPages } from "./pdf-render";
 import { tilePage } from "./tile";
 import { ocrTile, ensureCredsFileFromEnv } from "./google-vision";
@@ -14,6 +13,7 @@ import { mergeAdjacentSuffixes, dedupeOverlaps, filterByLegend } from "./dedupe"
 import { colorForCode } from "./colors";
 import type { JobResult, PageResult, RawHit, CodeEntry, Instance } from "./types";
 import { pMap } from "./concurrency";
+import { readJob, writeJob, pageImageKey } from "./jobs";
 
 const MAX_PAGES_IN_FLIGHT = 3;
 const MAX_TILES_IN_FLIGHT = 5;
@@ -22,25 +22,6 @@ export interface ProcessOptions {
   jobId: string;
   pdfName: string;
   pdfPath: string;
-}
-
-function jobKey(jobId: string) {
-  return `jobs/${jobId}/result.json`;
-}
-function pageImageKey(jobId: string, pageNumber: number) {
-  return `jobs/${jobId}/page-${pageNumber}.png`;
-}
-
-export async function readJob(jobId: string): Promise<JobResult | null> {
-  return getJson<JobResult>(jobKey(jobId));
-}
-
-export async function writeJob(job: JobResult): Promise<void> {
-  await putJson(jobKey(job.jobId), job);
-}
-
-export function newJobId(): string {
-  return uuid();
 }
 
 export async function runPipeline({ jobId, pdfName, pdfPath }: ProcessOptions): Promise<JobResult> {

@@ -1,9 +1,11 @@
 // Burn bbox rectangles onto the source PDF and stream it back.
 import { NextResponse } from "next/server";
 import { PDFDocument, rgb } from "pdf-lib";
-import { readJob } from "@/lib/process";
+import { readJob } from "@/lib/jobs";
 import { getBytes } from "@/lib/blob";
-import { RENDER_DPI } from "@/lib/pdf-render";
+// Inline the DPI constant — importing pdf-render here would drag pdfjs/sharp
+// into this route's bundle.
+const RENDER_DPI = 500;
 
 export const runtime = "nodejs";
 export const maxDuration = 60;

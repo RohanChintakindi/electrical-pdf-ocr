@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { putBytes, putJson } from "@/lib/blob";
-import { newJobId } from "@/lib/process";
+import { newJobId } from "@/lib/jobs";
 import type { JobResult } from "@/lib/types";
 
 export const runtime = "nodejs";

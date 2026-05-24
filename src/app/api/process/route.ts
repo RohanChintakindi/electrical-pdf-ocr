@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { runPipeline, readJob, writeJob } from "@/lib/process";
+import { runPipeline } from "@/lib/process";
+import { readJob, writeJob } from "@/lib/jobs";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;

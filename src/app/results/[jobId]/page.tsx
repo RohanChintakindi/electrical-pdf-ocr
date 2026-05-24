@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { readJob } from "@/lib/process";
+import { readJob } from "@/lib/jobs";
 import ResultsViewer from "@/components/ResultsViewer";
 
 export const dynamic = "force-dynamic";
