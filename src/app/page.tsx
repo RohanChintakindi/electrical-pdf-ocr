@@ -1,4 +1,5 @@
 import UploadDropzone from "@/components/UploadDropzone";
+import ClearBlobsPanel from "@/components/ClearBlobsPanel";
 
 export default function HomePage() {
   return (
@@ -105,6 +106,8 @@ export default function HomePage() {
                 body="Hits matched to legend codes — junk OCR is dropped."
               />
             </ol>
+
+            <ClearBlobsPanel />
           </aside>
         </section>
       </div>
