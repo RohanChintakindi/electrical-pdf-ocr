@@ -46,10 +46,13 @@ export default function UploadDropzone() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
-  const [recent, setRecent] = useState<RecentUpload[]>(() => loadRecent());
+  // Don't load from localStorage during render — it differs between SSR
+  // (empty) and the client and causes a hydration mismatch.
+  const [recent, setRecent] = useState<RecentUpload[]>([]);
   const [blobMode, setBlobMode] = useState<boolean | null>(null);
 
   useEffect(() => {
+    setRecent(loadRecent());
     detectBlobMode().then(setBlobMode);
   }, []);
 

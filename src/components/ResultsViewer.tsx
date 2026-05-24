@@ -344,14 +344,15 @@ function PageViewer({
   zoomRef: React.MutableRefObject<ReactZoomPanPinchRef | null>;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [scale, setScale] = useState(1);
+  const [scale, setScale] = useState<number | null>(null);
 
   useEffect(() => {
     const el = containerRef.current;
-    if (!el || !page) return;
+    if (!el || !page || page.width === 0 || page.height === 0) return;
     const update = () => {
       const cw = el.clientWidth;
       const ch = el.clientHeight;
+      if (cw === 0 || ch === 0) return;
       const s = Math.min(cw / page.width, ch / page.height) * 0.95;
       setScale(s);
     };
@@ -383,12 +384,19 @@ function PageViewer({
     );
   }
 
+  // Don't mount the zoom wrapper until we have a real fit-to-page scale.
+  // Otherwise initialScale=1 sticks and the page renders 25x zoomed in.
+  if (scale === null) {
+    return <div ref={containerRef} className="absolute inset-0" />;
+  }
+
   return (
     <div ref={containerRef} className="absolute inset-0">
       <TransformWrapper
+        key={`${page.pageNumber}-${page.width}-${page.height}`}
         ref={zoomRef}
         initialScale={scale}
-        minScale={0.05}
+        minScale={Math.min(0.05, scale * 0.5)}
         maxScale={20}
         centerOnInit
         wheel={{ step: 0.1 }}
