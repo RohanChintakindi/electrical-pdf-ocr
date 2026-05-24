@@ -21,35 +21,41 @@ async function getClient(): Promise<Anthropic> {
   return clientPromise;
 }
 
-async function rightStrip(pageBuf: Buffer, pageW: number, pageH: number, ratio = 0.28): Promise<Buffer> {
-  const left = Math.floor(pageW * (1 - ratio));
-  const width = pageW - left;
-  // Downsize so we don't blow up the API payload — long edge max 2048px is plenty
-  const cropped = sharp(pageBuf).extract({ left, top: 0, width, height: pageH });
-  const meta = await cropped.metadata();
-  if ((meta.width ?? 0) > 2048 || (meta.height ?? 0) > 2048) {
-    return cropped.resize({ width: Math.min(2048, meta.width ?? 2048), withoutEnlargement: true }).png().toBuffer();
+const MAX_EDGE = 3072;
+
+async function downsizedFull(pageBuf: Buffer): Promise<Buffer> {
+  // 3072 long-edge: enough resolution for the small schedule text to stay
+  // readable, but well under Claude's 8000px limit so token cost stays sane.
+  const img = sharp(pageBuf);
+  const meta = await img.metadata();
+  const w = meta.width ?? 0;
+  const h = meta.height ?? 0;
+  if (Math.max(w, h) <= MAX_EDGE) return img.png().toBuffer();
+  if (w >= h) {
+    return img.resize({ width: MAX_EDGE, withoutEnlargement: true }).png().toBuffer();
   }
-  return cropped.png().toBuffer();
+  return img.resize({ height: MAX_EDGE, withoutEnlargement: true }).png().toBuffer();
 }
 
-const SYS_PROMPT = `You are an OCR-aware engineering-drawing assistant. The user will show you a CROP from an engineering drawing. The crop is likely to contain a "lighting fixture schedule" or similar legend that lists fixture/equipment codes (e.g. LF1, LF2, LF7-X, P1, RC1) and their descriptions.
+const SYS_PROMPT = `You are an OCR-aware engineering-drawing assistant. The user will show you a page from an electrical engineering drawing. Some pages contain a "lighting fixture schedule", "luminaire schedule", "fixture legend", "symbols schedule", or similar table that lists fixture/equipment codes (e.g. LF1, LF2, LF7-X, P1, RC1) with descriptions.
 
 Return ONLY a JSON object with this exact shape, no prose:
 { "codes": [ { "code": "LF1", "description": "2x2 LED Recessed Troffer" }, ... ] }
 
 Rules:
-- Include EVERY code-style label (1-4 capital letters + digits + optional -suffix) that appears in the legend.
-- Code text exactly as printed.
-- Description: short, what the legend says next to the code. Empty string if not clear.
-- If the crop has no legend at all, return { "codes": [] }.
+- Look anywhere on the page for a schedule/legend/table that maps a code-style label to a description. It may be on the right edge, in a corner, in the middle, or be the whole page.
+- Include EVERY code-style label (1-4 capital letters + digits + optional -suffix like -X, -4, -6, -8) that appears as a row in such a schedule.
+- Code text exactly as printed (preserve case).
+- Description: short, the main text the schedule shows next to the code (manufacturer + type is fine). Empty string if not clear.
+- If this page has NO schedule/legend table at all, return { "codes": [] }.
+- Do NOT include codes that only appear as call-outs in the drawing itself — only entries that are explicitly listed in a schedule/legend table.
 - Never invent codes. Only return what you can actually read.`;
 
-export async function discoverLegend(pageBuf: Buffer, pageW: number, pageH: number): Promise<LegendEntry[]> {
+export async function discoverLegend(pageBuf: Buffer, _pageW: number, _pageH: number): Promise<LegendEntry[]> {
   try {
     const client = await getClient();
-    const stripPng = await rightStrip(pageBuf, pageW, pageH);
-    const b64 = stripPng.toString("base64");
+    const fullPng = await downsizedFull(pageBuf);
+    const b64 = fullPng.toString("base64");
     const resp = await client.messages.create({
       model: "claude-sonnet-4-6",
       max_tokens: 4096,
