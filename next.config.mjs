@@ -12,7 +12,15 @@ const nextConfig = {
   // pdfjs loads its worker module dynamically at runtime, so Next's static
   // tracer doesn't see it as a dependency. Force-include it for /api/process.
   outputFileTracingIncludes: {
-    "/api/process": [
+    // Both worker routes need the pdfjs worker .mjs + napi-rs canvas binary.
+    // Listed individually because Next's pattern matching here is exact-prefix
+    // per route, not a glob.
+    "/api/process-page": [
+      "./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs",
+      "./node_modules/@napi-rs/canvas/**",
+      "./node_modules/@napi-rs/canvas-linux-x64-gnu/**",
+    ],
+    "/api/process-legend": [
       "./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs",
       "./node_modules/@napi-rs/canvas/**",
       "./node_modules/@napi-rs/canvas-linux-x64-gnu/**",

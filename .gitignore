@@ -14,3 +14,4 @@ tsconfig.tsbuildinfo
 scripts/*.png
 
 .vercel
+.local-blob/

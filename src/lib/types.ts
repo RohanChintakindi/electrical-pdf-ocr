@@ -17,6 +17,8 @@ export interface PageResult {
   imageUrl: string;
   status: PageStatus;
   instances: Instance[];
+  /** Pre-legend-filter hits; merged across by finalize. Optional during streaming. */
+  rawHits?: RawHit[];
   errors?: string[];
 }
 
@@ -41,7 +43,22 @@ export interface JobResult {
   };
   pages: PageResult[];
   codes: CodeEntry[];
+  legend?: { code: string; description: string }[];
+  legendStatus?: "pending" | "done" | "error";
   error?: string;
+}
+
+/** Per-page result blob written by /api/process-page workers. */
+export interface PageJobResult {
+  jobId: string;
+  pageNumber: number;
+  width: number;
+  height: number;
+  imageUrl: string;
+  status: "done" | "error";
+  rawHits: RawHit[];
+  errors?: string[];
+  durationMs?: number;
 }
 
 export interface RawHit {

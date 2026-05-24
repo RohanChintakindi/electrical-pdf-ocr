@@ -63,6 +63,26 @@ export async function renderPdfPage(pdfBytes: Uint8Array, pageNumber: number): P
   }
 }
 
+/** Count pages and pick the largest by viewport area — no rendering. */
+export async function inspectPdf(pdfBytes: Uint8Array): Promise<{ pageCount: number; largestPage: number }> {
+  const doc = await openDoc(pdfBytes);
+  try {
+    const pageCount = doc.numPages;
+    let largestPage = 1;
+    let largestArea = 0;
+    for (let i = 1; i <= pageCount; i++) {
+      const page = await doc.getPage(i);
+      const vp = page.getViewport({ scale: 1 });
+      const area = vp.width * vp.height;
+      if (area > largestArea) { largestArea = area; largestPage = i; }
+      try { await page.cleanup(); } catch {}
+    }
+    return { pageCount, largestPage };
+  } finally {
+    try { await doc.destroy(); } catch {}
+  }
+}
+
 async function renderOne(doc: any, pageNumber: number): Promise<RenderedPage> {
   const page = await doc.getPage(pageNumber);
   const viewport = page.getViewport({ scale: SCALE });
