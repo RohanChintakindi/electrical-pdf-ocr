@@ -81,14 +81,14 @@ export function dedupeOverlaps(hits: RawHit[], threshold = 0.4): RawHit[] {
     for (const k of kept) {
       if (k.code !== h.code) continue;
       if (iou(h, k) > threshold) { drop = true; break; }
-      // Centroid distance: if two hits of the same code have centers within
-      // ~1 font height of each other, treat as a duplicate. Use h's height
-      // as the scale since proportional interpolation tends to preserve it.
+      // Centroid distance: only drop when centers are nearly coincident
+      // (within half a font height). Anything larger risks collapsing two
+      // legitimate adjacent fixtures with the same code (clusters happen).
       const cx1 = h.x + h.w / 2, cy1 = h.y + h.h / 2;
       const cx2 = k.x + k.w / 2, cy2 = k.y + k.h / 2;
       const dist = Math.hypot(cx1 - cx2, cy1 - cy2);
       const scale = Math.min(h.h, k.h) || 1;
-      if (dist < scale * 1.5) { drop = true; break; }
+      if (dist < scale * 0.5) { drop = true; break; }
     }
     if (!drop) kept.push(h);
   }
