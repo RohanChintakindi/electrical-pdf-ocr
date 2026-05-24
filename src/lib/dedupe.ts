@@ -1,5 +1,21 @@
 import type { RawHit, Instance } from "./types";
 
+// True iff `a` can be turned into `b` (or vice versa) by inserting or deleting
+// exactly one character. Assumes |len(a) - len(b)| === 1; caller guards.
+function isOneCharEdit(a: string, b: string): boolean {
+  let shorter = a, longer = b;
+  if (shorter.length > longer.length) [shorter, longer] = [longer, shorter];
+  if (longer.length - shorter.length !== 1) return false;
+  let i = 0, j = 0, skipped = false;
+  while (i < shorter.length && j < longer.length) {
+    if (shorter[i] === longer[j]) { i++; j++; continue; }
+    if (skipped) return false;
+    skipped = true;
+    j++; // consume the extra char in `longer`
+  }
+  return true; // trailing extra char in longer is fine
+}
+
 function iou(a: RawHit, b: RawHit): number {
   const ax2 = a.x + a.w;
   const ay2 = a.y + a.h;
@@ -95,17 +111,20 @@ export function dedupeOverlaps(hits: RawHit[], threshold = 0.4): RawHit[] {
   return kept;
 }
 
-// Final filter: only keep codes that match the legend (if provided) plus the regex shape.
+// Build a resolver function from a legend code list. Resolver returns the
+// canonical code (preserving wildcard suffixes), or null if no match.
+// Centralized so both filterByLegend and the verify pass use identical logic.
 //
 // Conventions:
 // - A legend entry like `LF7-X` means "LF7 with any -suffix" (X = wildcard).
 //   On Jesse's drawing the LF7-X row reads "-4 = 4', -6 = 6', -8 = 8'",
 //   so LF7-4 / LF7-6 / LF7-8 count against LF7-X.
-// - Fuzzy recovery: OCR often reads a circle symbol "○" right next to a code
-//   as the letter "O", so a fixture marked "(○)LF4" comes through as "OLF4".
-//   If a code doesn't match the legend exactly, try stripping one leading
-//   ambiguous letter and re-match. This rescues OLF4 → LF4, OLF10 → LF10, etc.
-export function filterByLegend(hits: RawHit[], legendCodes: string[]): Instance[] {
+// - Fuzzy recovery has 3 layers: exact/wildcard → leading-prefix budget →
+//   1-char edit anywhere. Edit-distance recovery abstains on ambiguity.
+export function buildLegendResolver(legendCodes: string[]): {
+  resolve: (code: string) => string | null;
+  hasLegend: boolean;
+} {
   const exact = new Set<string>();
   const wildcardPrefixes: string[] = [];
   for (const c of legendCodes) {
@@ -113,44 +132,25 @@ export function filterByLegend(hits: RawHit[], legendCodes: string[]): Instance[
     if (up.endsWith("-X")) wildcardPrefixes.push(up.slice(0, -1));
     exact.add(up);
   }
-  const useLegend = exact.size > 0;
+  const hasLegend = exact.size > 0;
 
-  // Returns the code itself if it matches the legend exactly, or matches a
-  // wildcard prefix. Wildcard matches keep their specific suffix (LF7-4
-  // stays LF7-4) so the count rollup preserves variant breakdowns.
   const wildcardCanonical = (code: string): string | null => {
     if (exact.has(code)) return code;
     for (const p of wildcardPrefixes) if (code.startsWith(p)) return code;
     return null;
   };
 
-  // Concrete candidates we can compare against — every exact legend code,
-  // plus a few illustrative wildcard variants (LF7-X expands so suffix matches
-  // can resolve "7-8" -> "LF7-8" via the LF7- wildcard).
   const legendCandidates = new Set<string>(exact);
   const SUFFIX_VARIANTS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
   for (const p of wildcardPrefixes) for (const s of SUFFIX_VARIANTS) legendCandidates.add(p + s);
 
-  // Generic recovery: try to find a legend code that, when we drop up to
-  // PREFIX_BUDGET leading characters from it, gives our detected code. This
-  // captures all the symbol/circle-prefix misread patterns in one rule:
-  //   OLF4   -> drop 0 from token, drop 0 from legend "LF4" → token "OLF4"
-  //             vs "LF4": suffix match with 1 char missing → ok
-  //   PLF4   -> same (token has 1 leading junk char vs legend)
-  //   F4     -> legend "LF4" has 1 leading char we don't have → match
-  //   7-8    -> legend "LF7-8" has 2 leading chars we don't have → match
-  //   EMLF5  -> token has 2 leading junk chars vs legend "LF5" → match
-  // PREFIX_BUDGET = 2 covers everything we've seen. No symbol-specific list.
   const PREFIX_BUDGET = 2;
   const recoverBySuffix = (code: string): string | null => {
-    // Case A: token is "junk" + legend_code. Strip up to PREFIX_BUDGET leading chars.
     for (let k = 1; k <= Math.min(PREFIX_BUDGET, code.length - 2); k++) {
       const tail = code.slice(k);
       const c = wildcardCanonical(tail);
       if (c) return c;
     }
-    // Case B: legend_code is "missing_prefix" + token. Find a legend code
-    // that ends with this token and has 1-2 leading chars more.
     for (const candidate of legendCandidates) {
       const diff = candidate.length - code.length;
       if (diff < 1 || diff > PREFIX_BUDGET) continue;
@@ -162,16 +162,40 @@ export function filterByLegend(hits: RawHit[], legendCodes: string[]): Instance[
     return null;
   };
 
+  const recoverByEdit = (code: string): string | null => {
+    if (code.length < 3) return null;
+    let match: string | null = null;
+    for (const candidate of legendCandidates) {
+      if (Math.abs(candidate.length - code.length) !== 1) continue;
+      if (!isOneCharEdit(code, candidate)) continue;
+      const resolved = wildcardCanonical(candidate);
+      if (!resolved) continue;
+      if (match && match !== resolved) return null;
+      match = resolved;
+    }
+    return match;
+  };
+
   const resolve = (code: string): string | null => {
     const direct = wildcardCanonical(code);
     if (direct) return direct;
-    return recoverBySuffix(code);
+    const suffix = recoverBySuffix(code);
+    if (suffix) return suffix;
+    return recoverByEdit(code);
   };
 
+  return { resolve, hasLegend };
+}
+
+// Final filter: only keep codes that match the legend (if provided).
+// Thin wrapper around buildLegendResolver for backwards compat with callers
+// that just want to filter a hit list.
+export function filterByLegend(hits: RawHit[], legendCodes: string[]): Instance[] {
+  const { resolve, hasLegend } = buildLegendResolver(legendCodes);
   const out: Instance[] = [];
   for (const h of hits) {
     if (h.code.startsWith("raw:")) continue;
-    if (!useLegend) {
+    if (!hasLegend) {
       out.push({ code: h.code, x: h.x, y: h.y, w: h.w, h: h.h, conf: h.conf });
       continue;
     }

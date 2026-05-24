@@ -2,10 +2,17 @@
 // merge their outputs into the master result.json with the final code rollup.
 // Multiple workers may call this concurrently; the write is idempotent so the
 // last write wins with the same content.
-import { readJob, readLegend, readPageJob, writeJob } from "./jobs";
-import { filterByLegend } from "./dedupe";
+import { getBytes } from "./blob";
+import { readJob, readLegend, readPageJob, writeJob, pageImageKey } from "./jobs";
+import { filterByLegend, buildLegendResolver } from "./dedupe";
+import { verifyPage } from "./claude-verify";
 import { colorForCode } from "./colors";
-import type { CodeEntry, JobResult, PageResult } from "./types";
+import { pMap } from "./concurrency";
+import type { CodeEntry, Instance, JobResult, PageResult } from "./types";
+
+// Turn this off via env to skip the extra Claude pass (saves ~10s + API spend)
+const VERIFY_ENABLED = process.env.OCR_VERIFY_DISABLED !== "1";
+const VERIFY_CONCURRENCY = 4;
 
 function smartSort(a: string, b: string): number {
   const re = /^([A-Z]+)(\d+)(-?.*)$/;
@@ -53,6 +60,46 @@ export async function tryFinalize(jobId: string): Promise<void> {
       errors: pj.errors,
     };
   });
+
+  // Verification pass: ask Claude to find labels Vision missed. Only on pages
+  // that already have at least one detection (others are non-fixture sheets:
+  // notes, schematics, title pages). Runs in parallel; failure is non-fatal.
+  let verifyAdded = 0;
+  let verifyDurationMs = 0;
+  if (VERIFY_ENABLED && legendCodes.length > 0) {
+    const { resolve } = buildLegendResolver(legendCodes);
+    const verifyStart = Date.now();
+    const verifyTargets = merged.filter((p) => p.instances.length > 0 && p.imageUrl);
+    const verifyResults = await pMap(verifyTargets, VERIFY_CONCURRENCY, async (page) => {
+      try {
+        const pageBuf = await getBytes(pageImageKey(jobId, page.pageNumber));
+        if (!pageBuf) return { page: page.pageNumber, added: [] as Instance[] };
+        const result = await verifyPage({
+          pageBuf,
+          pageW: page.width,
+          pageH: page.height,
+          legendCodes: legend.codes,
+          detected: page.instances,
+          resolveCode: resolve,
+        });
+        if (result.error) console.warn(`[finalize] verify page ${page.pageNumber} soft-fail:`, result.error);
+        return { page: page.pageNumber, added: result.added };
+      } catch (e: any) {
+        console.warn(`[finalize] verify page ${page.pageNumber} threw:`, e?.message ?? e);
+        return { page: page.pageNumber, added: [] as Instance[] };
+      }
+    });
+    const addedByPage = new Map(verifyResults.map((r) => [r.page, r.added]));
+    for (const page of merged) {
+      const extra = addedByPage.get(page.pageNumber);
+      if (extra && extra.length > 0) {
+        page.instances = [...page.instances, ...extra];
+        verifyAdded += extra.length;
+      }
+    }
+    verifyDurationMs = Date.now() - verifyStart;
+    console.log(`[finalize] verify added ${verifyAdded} hits across ${verifyTargets.length} pages in ${verifyDurationMs}ms`);
+  }
 
   const counts = new Map<string, number>();
   for (const p of merged) {
