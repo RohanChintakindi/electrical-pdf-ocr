@@ -3,6 +3,10 @@
 // resolve to the same @napi-rs/canvas instance pdfjs polyfilled globally.
 // Mixing instances triggers `ctx.fill(path)` failures.
 import sharp from "sharp";
+// pdfjs's NodeCanvasFactory does `require("@napi-rs/canvas")` at runtime via
+// a string-literal require Next's tracer can't see. Import it here so the
+// dep makes it into the function bundle.
+import "@napi-rs/canvas";
 
 export interface RenderedPage {
   pageNumber: number;

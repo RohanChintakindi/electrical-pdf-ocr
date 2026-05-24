@@ -14,6 +14,8 @@ const nextConfig = {
   outputFileTracingIncludes: {
     "/api/process": [
       "./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs",
+      "./node_modules/@napi-rs/canvas/**",
+      "./node_modules/@napi-rs/canvas-linux-x64-gnu/**",
     ],
   },
   // Vercel serverless functions have a 250 MB unzipped limit. The heavy deps
