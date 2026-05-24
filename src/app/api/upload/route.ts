@@ -1,34 +1,20 @@
 // Direct-to-Blob upload. The browser uploads the PDF straight to Vercel Blob;
-// this route only mints a one-shot upload token, then (in onUploadCompleted)
-// initialises the result.json stub + kicks off /api/process.
+// this route only mints a one-shot upload token. The browser then fires
+// /api/process, which is the SOLE writer of the initial master result.json —
+// onUploadCompleted intentionally does NOT write a stub anymore (it raced
+// with the orchestrator and clobbered it).
 //
 // Local dev (no BLOB_READ_WRITE_TOKEN): falls through to a tiny multipart
 // fallback that writes to .local-blob/ via lib/blob.ts.
 import { NextRequest, NextResponse } from "next/server";
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
-import { putBytes, putJson } from "@/lib/blob";
+import { putBytes } from "@/lib/blob";
 import { newJobId } from "@/lib/jobs";
-import type { JobResult } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const MAX_BYTES = 50 * 1024 * 1024;
-
-async function writeStub(jobId: string, pdfName: string, pdfPath: string) {
-  const stub: JobResult = {
-    jobId,
-    status: "queued",
-    pdfName,
-    pdfUrl: pdfPath,
-    processedAt: new Date().toISOString(),
-    ocrEngine: "google-vision",
-    meta: { totalPages: 0, totalHits: 0 },
-    pages: [],
-    codes: [],
-  };
-  await putJson(`jobs/${jobId}/result.json`, stub);
-}
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const hasBlob = !!process.env.BLOB_READ_WRITE_TOKEN;
@@ -52,16 +38,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             tokenPayload: JSON.stringify({ jobId, pdfName }),
           };
         },
-        onUploadCompleted: async ({ blob, tokenPayload }) => {
-          try {
-            const { jobId, pdfName } = JSON.parse(tokenPayload ?? "{}") as { jobId: string; pdfName: string };
-            await writeStub(jobId, pdfName, blob.url);
-            // The browser kicks off /api/process after this — fire-and-forget
-            // from inside a serverless function gets killed when the function
-            // exits.
-          } catch (e) {
-            console.error("[upload] onUploadCompleted failed:", e);
-          }
+        onUploadCompleted: async () => {
+          // Intentionally a no-op. The browser fires /api/process after
+          // upload() resolves, and the orchestrator owns the master state.
+          // Writing a stub here previously raced with — and clobbered — the
+          // orchestrator's "processing" master.
         },
       });
       return NextResponse.json(json);
@@ -83,9 +64,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const buf = Buffer.from(await file.arrayBuffer());
     const pdfPathname = `jobs/${jobId}/source.pdf`;
     await putBytes(pdfPathname, buf, "application/pdf");
-    await writeStub(jobId, file.name, pdfPathname);
-    // Browser kicks off /api/process — fire-and-forget from a serverless
-    // function gets killed when the function exits.
+    // No stub write — the browser fires /api/process next and the orchestrator
+    // owns the initial master state.
     return NextResponse.json({ jobId, pdfPath: pdfPathname, pdfName: file.name }, { status: 200 });
   } catch (e: any) {
     console.error("[upload] error:", e);
