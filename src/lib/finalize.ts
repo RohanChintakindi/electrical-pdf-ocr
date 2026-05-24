@@ -27,10 +27,19 @@ function smartSort(a: string, b: string): number {
   return a.localeCompare(b);
 }
 
-export async function tryFinalize(jobId: string): Promise<void> {
+// runVerify gates the expensive Claude verification pass. Only the dedicated
+// /api/finalize endpoint passes true (fresh 60s budget). Page workers and the
+// /api/result polling fallback pass false (default) so they don't block
+// behind 10-15s Claude calls and thrash the polling loop.
+export async function tryFinalize(jobId: string, opts: { runVerify?: boolean } = {}): Promise<void> {
+  const runVerify = opts.runVerify ?? false;
   const job = await readJob(jobId);
   if (!job) return;
-  if (job.status === "complete" || job.status === "partial" || job.status === "error") return;
+  // Normally a settled job is terminal. But runVerify=true is allowed to
+  // re-finalize because /api/result may have already written a base-only
+  // master before the orchestrator's /api/finalize call lands.
+  if (!runVerify && (job.status === "complete" || job.status === "partial" || job.status === "error")) return;
+  if (runVerify && job.status === "error") return;
 
   const totalPages = job.meta.totalPages;
   if (totalPages <= 0) return;
@@ -66,7 +75,7 @@ export async function tryFinalize(jobId: string): Promise<void> {
   // notes, schematics, title pages). Runs in parallel; failure is non-fatal.
   let verifyAdded = 0;
   let verifyDurationMs = 0;
-  if (VERIFY_ENABLED && legendCodes.length > 0) {
+  if (runVerify && VERIFY_ENABLED && legendCodes.length > 0) {
     const { resolve } = buildLegendResolver(legendCodes);
     const verifyStart = Date.now();
     const verifyTargets = merged.filter((p) => p.instances.length > 0 && p.imageUrl);
