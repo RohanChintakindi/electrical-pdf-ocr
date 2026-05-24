@@ -66,8 +66,13 @@ export function mergeAdjacentSuffixes(hits: RawHit[]): RawHit[] {
   return merged;
 }
 
-// Dedupe overlapping detections of the SAME code (e.g., across tile boundaries).
-// Keeps the highest-confidence one; drops any other instance that has IoU > threshold and same code.
+// Dedupe overlapping detections of the SAME code (e.g., across tile
+// boundaries OR a substring-extracted hit landing near a clean detection).
+// Drops a hit when it overlaps an existing kept hit by IoU > threshold OR
+// its center is within ~1 font-height of another kept hit of the same code.
+// The centroid check catches the substring-extract case where the
+// proportionally-interpolated bbox is offset from the clean bbox enough to
+// dodge the IoU threshold.
 export function dedupeOverlaps(hits: RawHit[], threshold = 0.4): RawHit[] {
   const sorted = [...hits].sort((a, b) => b.conf - a.conf);
   const kept: RawHit[] = [];
@@ -75,10 +80,15 @@ export function dedupeOverlaps(hits: RawHit[], threshold = 0.4): RawHit[] {
     let drop = false;
     for (const k of kept) {
       if (k.code !== h.code) continue;
-      if (iou(h, k) > threshold) {
-        drop = true;
-        break;
-      }
+      if (iou(h, k) > threshold) { drop = true; break; }
+      // Centroid distance: if two hits of the same code have centers within
+      // ~1 font height of each other, treat as a duplicate. Use h's height
+      // as the scale since proportional interpolation tends to preserve it.
+      const cx1 = h.x + h.w / 2, cy1 = h.y + h.h / 2;
+      const cx2 = k.x + k.w / 2, cy2 = k.y + k.h / 2;
+      const dist = Math.hypot(cx1 - cx2, cy1 - cy2);
+      const scale = Math.min(h.h, k.h) || 1;
+      if (dist < scale * 1.5) { drop = true; break; }
     }
     if (!drop) kept.push(h);
   }
@@ -105,11 +115,6 @@ export function filterByLegend(hits: RawHit[], legendCodes: string[]): Instance[
   }
   const useLegend = exact.size > 0;
 
-  const exactOrWildcard = (code: string): boolean => {
-    if (exact.has(code)) return true;
-    for (const p of wildcardPrefixes) if (code.startsWith(p)) return true;
-    return false;
-  };
   // Returns the code itself if it matches the legend exactly, or matches a
   // wildcard prefix. Wildcard matches keep their specific suffix (LF7-4
   // stays LF7-4) so the count rollup preserves variant breakdowns.
@@ -118,33 +123,49 @@ export function filterByLegend(hits: RawHit[], legendCodes: string[]): Instance[
     for (const p of wildcardPrefixes) if (code.startsWith(p)) return code;
     return null;
   };
-  // Returns the canonical legend code if `code` matches, else null.
-  // Tries (in order): exact/wildcard, strip-1-leading-char (handles a circle
-  // symbol next to a code that OCR mistook for a letter — observed: O, P,
-  // C, Q, 0), strip-2-leading-chars (handles "EM○LF5" → "LF5"), and finally
-  // prepend-L (handles "○LF4" where the circle ate the L → "F4").
-  const STRIPPABLE_LEADERS = new Set(["O", "0", "Q", "C", "P", "D", "G"]);
+
+  // Concrete candidates we can compare against — every exact legend code,
+  // plus a few illustrative wildcard variants (LF7-X expands so suffix matches
+  // can resolve "7-8" -> "LF7-8" via the LF7- wildcard).
+  const legendCandidates = new Set<string>(exact);
+  const SUFFIX_VARIANTS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
+  for (const p of wildcardPrefixes) for (const s of SUFFIX_VARIANTS) legendCandidates.add(p + s);
+
+  // Generic recovery: try to find a legend code that, when we drop up to
+  // PREFIX_BUDGET leading characters from it, gives our detected code. This
+  // captures all the symbol/circle-prefix misread patterns in one rule:
+  //   OLF4   -> drop 0 from token, drop 0 from legend "LF4" → token "OLF4"
+  //             vs "LF4": suffix match with 1 char missing → ok
+  //   PLF4   -> same (token has 1 leading junk char vs legend)
+  //   F4     -> legend "LF4" has 1 leading char we don't have → match
+  //   7-8    -> legend "LF7-8" has 2 leading chars we don't have → match
+  //   EMLF5  -> token has 2 leading junk chars vs legend "LF5" → match
+  // PREFIX_BUDGET = 2 covers everything we've seen. No symbol-specific list.
+  const PREFIX_BUDGET = 2;
+  const recoverBySuffix = (code: string): string | null => {
+    // Case A: token is "junk" + legend_code. Strip up to PREFIX_BUDGET leading chars.
+    for (let k = 1; k <= Math.min(PREFIX_BUDGET, code.length - 2); k++) {
+      const tail = code.slice(k);
+      const c = wildcardCanonical(tail);
+      if (c) return c;
+    }
+    // Case B: legend_code is "missing_prefix" + token. Find a legend code
+    // that ends with this token and has 1-2 leading chars more.
+    for (const candidate of legendCandidates) {
+      const diff = candidate.length - code.length;
+      if (diff < 1 || diff > PREFIX_BUDGET) continue;
+      if (candidate.endsWith(code)) {
+        const c = wildcardCanonical(candidate);
+        if (c) return c;
+      }
+    }
+    return null;
+  };
+
   const resolve = (code: string): string | null => {
     const direct = wildcardCanonical(code);
     if (direct) return direct;
-    // Strip one leading misread letter
-    if (code.length > 2 && STRIPPABLE_LEADERS.has(code[0])) {
-      const c = wildcardCanonical(code.slice(1));
-      if (c) return c;
-    }
-    // Strip two leading misread letters (e.g. "EM" annotation + circle joined to code)
-    if (code.length > 3 && STRIPPABLE_LEADERS.has(code[1])) {
-      const c = wildcardCanonical(code.slice(2));
-      if (c) return c;
-    }
-    // Prepend L for things like F4 that were short by an L (circle absorbed it).
-    // Constrain to codes shaped like a fixture (1 cap + digits) to avoid
-    // converting noise like "B5" into "LB5".
-    if (/^F\d+(?:-\w+)?$/.test(code)) {
-      const c = wildcardCanonical("L" + code);
-      if (c) return c;
-    }
-    return null;
+    return recoverBySuffix(code);
   };
 
   const out: Instance[] = [];
