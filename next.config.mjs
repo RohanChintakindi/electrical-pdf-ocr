@@ -9,6 +9,13 @@ const nextConfig = {
   experimental: {
     serverActions: { bodySizeLimit: "60mb" },
   },
+  // pdfjs loads its worker module dynamically at runtime, so Next's static
+  // tracer doesn't see it as a dependency. Force-include it for /api/process.
+  outputFileTracingIncludes: {
+    "/api/process": [
+      "./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs",
+    ],
+  },
   // Vercel serverless functions have a 250 MB unzipped limit. The heavy deps
   // (pdfjs-dist, @napi-rs/canvas, sharp, @google-cloud/vision) ship lots of
   // material we never use at runtime. Exclude it from every function bundle —
