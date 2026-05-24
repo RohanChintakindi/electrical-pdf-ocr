@@ -10,7 +10,10 @@ import { pageImageKey, writePageJob } from "./jobs";
 import { tryFinalize } from "./finalize";
 import type { RawHit } from "./types";
 
-const MAX_TILES_IN_FLIGHT = 8;
+// Bumped to 16 — Vision DOCUMENT_TEXT_DETECTION default quota is 1800
+// req/min/project so we have headroom even with 7 pages × 16 tiles, and
+// callVisionWithRetry handles 429s with exponential backoff if we cross it.
+const MAX_TILES_IN_FLIGHT = 16;
 
 export interface ProcessPageInput {
   jobId: string;

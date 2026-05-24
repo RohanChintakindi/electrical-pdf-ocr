@@ -18,8 +18,12 @@ export interface ProcessLegendInput {
   pdfPath: string;
 }
 
-const RENDER_CONCURRENCY = 2;
-const CLAUDE_CONCURRENCY = 4;
+// Set to match the floor of "typical" page counts in our test corpus
+// (Aurora 6, Idaho 5-6, Richmond 6, Jesse's 7). One slot per page means
+// no batching — every page renders + asks Claude in true parallel.
+// Render is memory-bound (sharp + pdfjs); 6 stays under Hobby memory.
+const RENDER_CONCURRENCY = 6;
+const CLAUDE_CONCURRENCY = 8;
 
 /** Try to fetch an OCR-worker-rendered page PNG from Blob. Returns null if
  * not yet written or not reachable. Saves us from re-rendering the page. */

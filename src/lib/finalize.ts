@@ -12,9 +12,9 @@ import type { CodeEntry, Instance, JobResult, PageResult } from "./types";
 
 // Turn this off via env to skip the extra Claude pass (saves ~10s + API spend)
 const VERIFY_ENABLED = process.env.OCR_VERIFY_DISABLED !== "1";
-// One concurrent Claude call per page — keeps wall time flat regardless of
-// fixture-page count, bounded by API rate limits.
-const VERIFY_CONCURRENCY = 7;
+// Verify is one Claude call per page, so wall time = max(page_latency) once
+// concurrency is at or above page count. 12 covers most PDFs.
+const VERIFY_CONCURRENCY = 12;
 // Pages with very few base detections are almost always text-only sheets
 // (specifications, notes, schematics). Running verify on those produces
 // false-positive hallucinations because Claude tries to find fixtures in

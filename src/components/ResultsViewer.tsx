@@ -112,7 +112,13 @@ export default function ResultsViewer({ initial }: Props) {
   // Time-based smoothing — the bar self-advances toward a ceiling based on
   // expected wall time, capped by the actual server-reported progress. Even
   // when all 7 workers are silently churning, the bar keeps moving.
-  const startTimeRef = useRef<number>(Date.now());
+  // Anchor elapsed to the server's processedAt timestamp (set when the
+  // orchestrator seeded the job) so navigating away and back doesn't reset
+  // the timer — the job runs on serverless workers, not in the browser.
+  const startMs = useMemo(
+    () => (job.processedAt ? new Date(job.processedAt).getTime() : Date.now()),
+    [job.processedAt],
+  );
   const [now, setNow] = useState<number>(Date.now());
   useEffect(() => {
     if (!isProcessing) return;
@@ -127,7 +133,7 @@ export default function ResultsViewer({ initial }: Props) {
     : 0;
   // Time-derived: log curve that hits ~70 at expected wall (60s) and
   // asymptotes to 88. Gives the bar life when nothing else is moving.
-  const elapsedSec = (now - startTimeRef.current) / 1000;
+  const elapsedSec = Math.max(0, (now - startMs) / 1000);
   const timePct = isProcessing
     ? Math.min(88, 88 * (1 - Math.exp(-elapsedSec / 30)))
     : 0;
