@@ -110,9 +110,12 @@ export function filterByLegend(hits: RawHit[], legendCodes: string[]): Instance[
     for (const p of wildcardPrefixes) if (code.startsWith(p)) return true;
     return false;
   };
+  // Returns the code itself if it matches the legend exactly, or matches a
+  // wildcard prefix. Wildcard matches keep their specific suffix (LF7-4
+  // stays LF7-4) so the count rollup preserves variant breakdowns.
   const wildcardCanonical = (code: string): string | null => {
     if (exact.has(code)) return code;
-    for (const p of wildcardPrefixes) if (code.startsWith(p)) return p + "X";
+    for (const p of wildcardPrefixes) if (code.startsWith(p)) return code;
     return null;
   };
   // Returns the canonical legend code if `code` matches, else null.
