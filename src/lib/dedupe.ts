@@ -110,15 +110,36 @@ export function filterByLegend(hits: RawHit[], legendCodes: string[]): Instance[
     for (const p of wildcardPrefixes) if (code.startsWith(p)) return true;
     return false;
   };
-  // Returns the canonical legend code if `code` matches, else null. Tries an
-  // exact/wildcard match first, then a stripped-leading-letter variant when
-  // the leading char is one of the "circle / annotation" misreads.
-  const STRIPPABLE_LEADERS = new Set(["O", "0", "Q", "C"]);
+  const wildcardCanonical = (code: string): string | null => {
+    if (exact.has(code)) return code;
+    for (const p of wildcardPrefixes) if (code.startsWith(p)) return p + "X";
+    return null;
+  };
+  // Returns the canonical legend code if `code` matches, else null.
+  // Tries (in order): exact/wildcard, strip-1-leading-char (handles a circle
+  // symbol next to a code that OCR mistook for a letter — observed: O, P,
+  // C, Q, 0), strip-2-leading-chars (handles "EM○LF5" → "LF5"), and finally
+  // prepend-L (handles "○LF4" where the circle ate the L → "F4").
+  const STRIPPABLE_LEADERS = new Set(["O", "0", "Q", "C", "P", "D", "G"]);
   const resolve = (code: string): string | null => {
-    if (exactOrWildcard(code)) return code;
+    const direct = wildcardCanonical(code);
+    if (direct) return direct;
+    // Strip one leading misread letter
     if (code.length > 2 && STRIPPABLE_LEADERS.has(code[0])) {
-      const stripped = code.slice(1);
-      if (exactOrWildcard(stripped)) return stripped;
+      const c = wildcardCanonical(code.slice(1));
+      if (c) return c;
+    }
+    // Strip two leading misread letters (e.g. "EM" annotation + circle joined to code)
+    if (code.length > 3 && STRIPPABLE_LEADERS.has(code[1])) {
+      const c = wildcardCanonical(code.slice(2));
+      if (c) return c;
+    }
+    // Prepend L for things like F4 that were short by an L (circle absorbed it).
+    // Constrain to codes shaped like a fixture (1 cap + digits) to avoid
+    // converting noise like "B5" into "LB5".
+    if (/^F\d+(?:-\w+)?$/.test(code)) {
+      const c = wildcardCanonical("L" + code);
+      if (c) return c;
     }
     return null;
   };
