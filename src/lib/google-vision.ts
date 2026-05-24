@@ -19,6 +19,10 @@ function normalize(s: string): string {
 
 // ^[A-Z]{1,4}\d+(-\w+)?$ — generic code shape: 1-4 caps, digits, optional -suffix
 const CODE_RE = /^[A-Z]{1,4}\d+(-\w+)?$/;
+// Same shape, used to extract *substrings* from tokens that contain extra
+// noise (e.g. "LF11B#5" packs LF11 next to a circuit number). The `g` flag
+// is required for matchAll.
+const CODE_EXTRACT_RE = /[A-Z]{1,4}\d+(?:-\w+)?/g;
 
 let clientPromise: Promise<ImageAnnotatorClient> | null = null;
 
@@ -70,7 +74,10 @@ async function callVisionWithRetry(png: Buffer, attempts = 3): Promise<any> {
   throw lastErr;
 }
 
-// Extract every word + its bbox (after normalize+regex filter).
+// Extract every word + its bbox. Uses a substring regex so a token like
+// "LF11B#5" yields both LF11 and B5 as separate hits (the bbox is interpolated
+// proportionally within the original word's box). This catches codes that
+// OCR concatenated with adjacent labels.
 export async function ocrTile(png: Buffer, tileOffsetX: number, tileOffsetY: number): Promise<RawHit[]> {
   const resp = await callVisionWithRetry(png);
   const hits: RawHit[] = [];
@@ -89,27 +96,42 @@ export async function ocrTile(png: Buffer, tileOffsetX: number, tileOffsetY: num
           const y = Math.min(...ys);
           const w = Math.max(...xs) - x;
           const h = Math.max(...ys) - y;
-          if (!CODE_RE.test(text)) {
-            // not a code on its own — but keep raw words so we can do LF7+X merge
-            // tag with `raw:` prefix; merge step will strip
+          const conf = Number(word.confidence ?? 0);
+
+          // Find every code-shaped substring within the token.
+          const matches = [...text.matchAll(CODE_EXTRACT_RE)];
+          if (matches.length === 0) {
+            // Keep raw words so the LF7+X merge step can build LF7-X from
+            // a bare "LF7" followed by an "X" in an adjacent token.
             hits.push({
               code: `raw:${text}`,
-              conf: Number(word.confidence ?? 0),
-              x: tileOffsetX + x,
-              y: tileOffsetY + y,
-              w,
-              h,
+              conf, x: tileOffsetX + x, y: tileOffsetY + y, w, h,
             });
             continue;
           }
-          hits.push({
-            code: text,
-            conf: Number(word.confidence ?? 0),
-            x: tileOffsetX + x,
-            y: tileOffsetY + y,
-            w,
-            h,
-          });
+          if (matches.length === 1 && matches[0][0] === text) {
+            // Clean whole-token match — fast path, keep the exact bbox.
+            hits.push({ code: text, conf, x: tileOffsetX + x, y: tileOffsetY + y, w, h });
+            continue;
+          }
+          // Multi-match or partial-match: interpolate bbox proportionally
+          // across the token width. Approximate but good enough for clickable
+          // boxes on the rendered page.
+          const tokenLen = text.length;
+          for (const m of matches) {
+            const start = m.index ?? 0;
+            const end = start + m[0].length;
+            const subX = x + (start / tokenLen) * w;
+            const subW = ((end - start) / tokenLen) * w;
+            hits.push({
+              code: m[0],
+              conf,
+              x: tileOffsetX + subX,
+              y: tileOffsetY + y,
+              w: subW,
+              h,
+            });
+          }
         }
       }
     }

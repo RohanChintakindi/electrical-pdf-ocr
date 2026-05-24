@@ -86,9 +86,15 @@ export function dedupeOverlaps(hits: RawHit[], threshold = 0.4): RawHit[] {
 }
 
 // Final filter: only keep codes that match the legend (if provided) plus the regex shape.
-// Convention: a legend entry like `LF7-X` means "LF7 with any -suffix" (X = wildcard).
-// On Jesse's drawing the LF7-X legend row literally says "-4 = 4', -6 = 6', -8 = 8'",
-// so LF7-4 / LF7-6 / LF7-8 are real instances that should count against LF7-X.
+//
+// Conventions:
+// - A legend entry like `LF7-X` means "LF7 with any -suffix" (X = wildcard).
+//   On Jesse's drawing the LF7-X row reads "-4 = 4', -6 = 6', -8 = 8'",
+//   so LF7-4 / LF7-6 / LF7-8 count against LF7-X.
+// - Fuzzy recovery: OCR often reads a circle symbol "○" right next to a code
+//   as the letter "O", so a fixture marked "(○)LF4" comes through as "OLF4".
+//   If a code doesn't match the legend exactly, try stripping one leading
+//   ambiguous letter and re-match. This rescues OLF4 → LF4, OLF10 → LF10, etc.
 export function filterByLegend(hits: RawHit[], legendCodes: string[]): Instance[] {
   const exact = new Set<string>();
   const wildcardPrefixes: string[] = [];
@@ -98,16 +104,35 @@ export function filterByLegend(hits: RawHit[], legendCodes: string[]): Instance[
     exact.add(up);
   }
   const useLegend = exact.size > 0;
-  const matches = (code: string): boolean => {
+
+  const exactOrWildcard = (code: string): boolean => {
     if (exact.has(code)) return true;
     for (const p of wildcardPrefixes) if (code.startsWith(p)) return true;
     return false;
   };
+  // Returns the canonical legend code if `code` matches, else null. Tries an
+  // exact/wildcard match first, then a stripped-leading-letter variant when
+  // the leading char is one of the "circle / annotation" misreads.
+  const STRIPPABLE_LEADERS = new Set(["O", "0", "Q", "C"]);
+  const resolve = (code: string): string | null => {
+    if (exactOrWildcard(code)) return code;
+    if (code.length > 2 && STRIPPABLE_LEADERS.has(code[0])) {
+      const stripped = code.slice(1);
+      if (exactOrWildcard(stripped)) return stripped;
+    }
+    return null;
+  };
+
   const out: Instance[] = [];
   for (const h of hits) {
     if (h.code.startsWith("raw:")) continue;
-    if (useLegend && !matches(h.code.toUpperCase())) continue;
-    out.push({ code: h.code, x: h.x, y: h.y, w: h.w, h: h.h, conf: h.conf });
+    if (!useLegend) {
+      out.push({ code: h.code, x: h.x, y: h.y, w: h.w, h: h.h, conf: h.conf });
+      continue;
+    }
+    const canonical = resolve(h.code.toUpperCase());
+    if (!canonical) continue;
+    out.push({ code: canonical, x: h.x, y: h.y, w: h.w, h: h.h, conf: h.conf });
   }
   return out;
 }
