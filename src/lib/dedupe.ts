@@ -86,13 +86,27 @@ export function dedupeOverlaps(hits: RawHit[], threshold = 0.4): RawHit[] {
 }
 
 // Final filter: only keep codes that match the legend (if provided) plus the regex shape.
+// Convention: a legend entry like `LF7-X` means "LF7 with any -suffix" (X = wildcard).
+// On Jesse's drawing the LF7-X legend row literally says "-4 = 4', -6 = 6', -8 = 8'",
+// so LF7-4 / LF7-6 / LF7-8 are real instances that should count against LF7-X.
 export function filterByLegend(hits: RawHit[], legendCodes: string[]): Instance[] {
-  const set = new Set(legendCodes.map((c) => c.toUpperCase()));
-  const useLegend = set.size > 0;
+  const exact = new Set<string>();
+  const wildcardPrefixes: string[] = [];
+  for (const c of legendCodes) {
+    const up = c.toUpperCase();
+    if (up.endsWith("-X")) wildcardPrefixes.push(up.slice(0, -1));
+    exact.add(up);
+  }
+  const useLegend = exact.size > 0;
+  const matches = (code: string): boolean => {
+    if (exact.has(code)) return true;
+    for (const p of wildcardPrefixes) if (code.startsWith(p)) return true;
+    return false;
+  };
   const out: Instance[] = [];
   for (const h of hits) {
     if (h.code.startsWith("raw:")) continue;
-    if (useLegend && !set.has(h.code.toUpperCase())) continue;
+    if (useLegend && !matches(h.code.toUpperCase())) continue;
     out.push({ code: h.code, x: h.x, y: h.y, w: h.w, h: h.h, conf: h.conf });
   }
   return out;
