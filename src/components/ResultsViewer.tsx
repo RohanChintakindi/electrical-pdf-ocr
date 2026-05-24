@@ -487,9 +487,12 @@ function ProgressPanel({
       ? "active"
       : "pending";
 
-  // Typical job ETAs. Hobby plan: ~70s typical, 90-100s worst case.
-  const TARGET_SEC = 70;
-  const remainingSec = Math.max(0, Math.round(TARGET_SEC * (1 - overallPct / 100)));
+  // Pure elapsed-based countdown — overallPct sits flat while pages are
+  // mid-flight, so coupling "X left" to it makes the countdown stick. This
+  // ticks every second based on real elapsed time. Once we pass TARGET_SEC
+  // we just hide the estimate rather than lie with a fake number.
+  const TARGET_SEC = 95; // typical wall: 75-95s on Hobby with verify pass
+  const remainingSec = Math.max(0, Math.round(TARGET_SEC - elapsedSec));
   const minsElapsed = Math.floor(elapsedSec / 60);
   const secsElapsed = Math.floor(elapsedSec % 60);
 
@@ -549,7 +552,7 @@ function ProgressPanel({
           </div>
           <span className="font-mono text-[10px] uppercase tracking-wider2 text-muted-foreground num shrink-0">
             {minsElapsed}:{secsElapsed.toString().padStart(2, "0")} elapsed
-            {remainingSec > 0 && overallPct >= 5 && (
+            {remainingSec > 0 && elapsedSec >= 3 && (
               <>
                 <span className="mx-1.5 text-border-strong">·</span>
                 ~{remainingSec}s left

@@ -12,7 +12,14 @@ import type { CodeEntry, Instance, JobResult, PageResult } from "./types";
 
 // Turn this off via env to skip the extra Claude pass (saves ~10s + API spend)
 const VERIFY_ENABLED = process.env.OCR_VERIFY_DISABLED !== "1";
-const VERIFY_CONCURRENCY = 4;
+// One concurrent Claude call per page — keeps wall time flat regardless of
+// fixture-page count, bounded by API rate limits.
+const VERIFY_CONCURRENCY = 7;
+// Pages with very few base detections are almost always text-only sheets
+// (specifications, notes, schematics). Running verify on those produces
+// false-positive hallucinations because Claude tries to find fixtures in
+// boilerplate text. Skip unless the page looks like a real plan.
+const VERIFY_MIN_HITS = 5;
 
 function smartSort(a: string, b: string): number {
   const re = /^([A-Z]+)(\d+)(-?.*)$/;
@@ -78,7 +85,7 @@ export async function tryFinalize(jobId: string, opts: { runVerify?: boolean } =
   if (runVerify && VERIFY_ENABLED && legendCodes.length > 0) {
     const { resolve } = buildLegendResolver(legendCodes);
     const verifyStart = Date.now();
-    const verifyTargets = merged.filter((p) => p.instances.length > 0 && p.imageUrl);
+    const verifyTargets = merged.filter((p) => p.instances.length >= VERIFY_MIN_HITS && p.imageUrl);
     const verifyResults = await pMap(verifyTargets, VERIFY_CONCURRENCY, async (page) => {
       try {
         const pageBuf = await getBytes(pageImageKey(jobId, page.pageNumber));

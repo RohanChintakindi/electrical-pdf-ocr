@@ -13,6 +13,7 @@ interface RecentUpload {
 }
 
 const RECENT_KEY = "epo:recent-uploads";
+const RECENT_CLEAR_EVENT = "epo:recent-cleared";
 
 function loadRecent(): RecentUpload[] {
   if (typeof window === "undefined") return [];
@@ -26,6 +27,11 @@ function pushRecent(item: RecentUpload) {
   const all = loadRecent();
   const next = [item, ...all.filter((r) => r.jobId !== item.jobId)].slice(0, 5);
   localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+}
+export function clearRecent() {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(RECENT_KEY);
+  window.dispatchEvent(new CustomEvent(RECENT_CLEAR_EVENT));
 }
 
 async function detectBlobMode(): Promise<boolean> {
@@ -54,6 +60,9 @@ export default function UploadDropzone() {
   useEffect(() => {
     setRecent(loadRecent());
     detectBlobMode().then(setBlobMode);
+    const onCleared = () => setRecent([]);
+    window.addEventListener(RECENT_CLEAR_EVENT, onCleared);
+    return () => window.removeEventListener(RECENT_CLEAR_EVENT, onCleared);
   }, []);
 
   const handleFile = useCallback(

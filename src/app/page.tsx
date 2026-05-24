@@ -88,7 +88,7 @@ export default function HomePage() {
               <Step
                 n="01"
                 title="Render"
-                body="Each page rasterized at 500 DPI in a serverless worker."
+                body="Each page rasterized at 400 DPI in its own serverless worker."
               />
               <Step
                 n="02"
@@ -103,7 +103,12 @@ export default function HomePage() {
               <Step
                 n="04"
                 title="Filter"
-                body="Hits matched to legend codes — junk OCR is dropped."
+                body="Hits matched to legend codes with 1-edit fuzzy recovery for occluded labels."
+              />
+              <Step
+                n="05"
+                title="Verify"
+                body="Second Claude pass per page hunts for labels Vision missed."
               />
             </ol>
 
@@ -116,7 +121,7 @@ export default function HomePage() {
       <footer className="relative z-10 border-t border-border/60 mt-10">
         <div className="max-w-6xl mx-auto px-6 sm:px-10 py-5 flex items-center justify-between text-[10px] font-mono uppercase tracking-wider2 text-muted-foreground">
           <span>Sheet 01 / 01 · Drawing intelligence</span>
-          <span>Scale: 1 : 1 · DPI 500</span>
+          <span>Scale: 1 : 1 · DPI 400</span>
         </div>
       </footer>
     </main>

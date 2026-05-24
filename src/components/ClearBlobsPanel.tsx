@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { clearRecent } from "./UploadDropzone";
 
 type Status = "idle" | "confirm" | "running" | "ok" | "error";
 
@@ -21,6 +22,9 @@ export default function ClearBlobsPanel() {
       const resp = await fetch("/api/admin/clear-blobs", { method: "POST" });
       const json = (await resp.json()) as { ok: boolean; deleted?: number; freedMB?: number; error?: string };
       if (json.ok) {
+        // Browser-side recents reference blobs we just deleted — drop them
+        // so the Recent Jobs list doesn't show dead links.
+        clearRecent();
         setResult({ deleted: json.deleted ?? 0, freedMB: json.freedMB ?? 0 });
         setStatus("ok");
       } else {
