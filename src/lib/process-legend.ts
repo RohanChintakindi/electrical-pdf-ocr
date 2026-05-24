@@ -7,7 +7,7 @@
 // every page, then merge. Each call returns [] for non-legend pages, so
 // merging is safe.
 import { getBytes } from "./blob";
-import { renderPdfPage } from "./pdf-render";
+import { renderPdfPageLowRes } from "./pdf-render";
 import { inspectPdfLight } from "./pdf-inspect";
 import { discoverLegend, type LegendEntry } from "./claude-legend";
 import { writeLegend } from "./jobs";
@@ -30,8 +30,9 @@ export async function processLegend({ jobId, pdfPath }: ProcessLegendInput): Pro
     const { pageCount } = await inspectPdfLight(new Uint8Array(pdfBytes));
     const pageNumbers = Array.from({ length: pageCount }, (_, i) => i + 1);
 
+    // Low-DPI is fine for Claude vision — it's ~10x faster than the OCR render.
     const rendered = await pMap(pageNumbers, RENDER_CONCURRENCY, (pn) =>
-      renderPdfPage(new Uint8Array(pdfBytes), pn).then((r) => ({ pn, ...r })),
+      renderPdfPageLowRes(new Uint8Array(pdfBytes), pn).then((r) => ({ pn, ...r })),
     );
 
     const perPageCodes = await pMap(rendered, CLAUDE_CONCURRENCY, async (r) => {

@@ -46,7 +46,7 @@ export async function renderPdfPages(pdfBytes: Uint8Array): Promise<RenderedPage
   try {
     const pages: RenderedPage[] = [];
     for (let i = 1; i <= doc.numPages; i++) {
-      pages.push(await renderOne(doc, i));
+      pages.push(await renderOne(doc, i, SCALE));
     }
     return pages;
   } finally {
@@ -57,7 +57,19 @@ export async function renderPdfPages(pdfBytes: Uint8Array): Promise<RenderedPage
 export async function renderPdfPage(pdfBytes: Uint8Array, pageNumber: number): Promise<RenderedPage> {
   const doc = await openDoc(pdfBytes);
   try {
-    return await renderOne(doc, pageNumber);
+    return await renderOne(doc, pageNumber, SCALE);
+  } finally {
+    try { await doc.destroy(); } catch {}
+  }
+}
+
+/** Low-DPI render for tasks that don't need OCR-grade resolution (e.g.
+ * showing the page to Claude for legend extraction). ~10x faster than the
+ * 500-DPI OCR render. */
+export async function renderPdfPageLowRes(pdfBytes: Uint8Array, pageNumber: number, dpi = 150): Promise<RenderedPage> {
+  const doc = await openDoc(pdfBytes);
+  try {
+    return await renderOne(doc, pageNumber, dpi / PDF_POINTS_PER_INCH);
   } finally {
     try { await doc.destroy(); } catch {}
   }
@@ -83,9 +95,9 @@ export async function inspectPdf(pdfBytes: Uint8Array): Promise<{ pageCount: num
   }
 }
 
-async function renderOne(doc: any, pageNumber: number): Promise<RenderedPage> {
+async function renderOne(doc: any, pageNumber: number, scale: number = SCALE): Promise<RenderedPage> {
   const page = await doc.getPage(pageNumber);
-  const viewport = page.getViewport({ scale: SCALE });
+  const viewport = page.getViewport({ scale });
   const width = Math.ceil(viewport.width);
   const height = Math.ceil(viewport.height);
 
