@@ -1,3 +1,14 @@
 node_modules/
 .env*
 .next/
+out/
+dist/
+*.log
+.DS_Store
+.vercel
+/.tmp
+/uploads
+/coverage
+next-env.d.ts
+tsconfig.tsbuildinfo
+scripts/*.png
