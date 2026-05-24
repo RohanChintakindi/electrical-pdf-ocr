@@ -61,7 +61,7 @@ const nextConfig = {
       "node_modules/@img/sharp-libvips-win32-*/**",
       "node_modules/@img/sharp-libvips-linuxmusl-*/**",
       "node_modules/@img/sharp-libvips-linux-arm*/**",
-      "node_modules/@google-cloud/vision/build/protos/**",
+      // (protos/ is needed at runtime by gRPC client — do NOT exclude)
       "**/*.md",
       "**/*.d.ts",
       "**/*.map",
