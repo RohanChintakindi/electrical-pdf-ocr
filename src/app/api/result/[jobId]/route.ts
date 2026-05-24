@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { readJob, readLegend, readPageJob, writeLegend } from "@/lib/jobs";
 import { tryFinalize } from "@/lib/finalize";
+import type { JobResult } from "@/lib/types";
 
 export const runtime = "nodejs";
 
@@ -63,5 +64,17 @@ export async function GET(_req: Request, { params }: { params: Promise<{ jobId: 
       errors: pj.errors,
     };
   });
-  return NextResponse.json(job, { headers: { "cache-control": "no-store" } });
+
+  // Surface legend status so the UI can show a separate phase indicator.
+  const legendBlob = await readLegend(jobId);
+  if (legendBlob) {
+    job.legendStatus = legendBlob.status;
+  } else {
+    // No legend blob yet — legend worker is either pending or in flight.
+    if (!job.legendStatus || job.legendStatus === "pending") {
+      job.legendStatus = "pending";
+    }
+  }
+
+  return NextResponse.json(job satisfies JobResult, { headers: { "cache-control": "no-store" } });
 }

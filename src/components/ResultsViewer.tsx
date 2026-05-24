@@ -183,32 +183,17 @@ export default function ResultsViewer({ initial }: Props) {
         </div>
       </header>
 
-      {/* Progress strip — visible while processing */}
+      {/* Progress panel — visible while processing */}
       {isProcessing && (
-        <div className="relative border-b border-border bg-background shrink-0 overflow-hidden">
-          <div className="px-4 py-2.5 flex items-center gap-4 text-xs">
-            <span className="font-mono text-[10px] uppercase tracking-wider2 text-primary shrink-0">
-              {overallStatus === "queued"
-                ? "Initializing"
-                : pagesDone === pagesTotal && pagesTotal > 0
-                ? "Finalizing"
-                : "Reading pages"}
-            </span>
-            <div className="flex-1 relative h-px bg-border">
-              <div
-                className="absolute inset-y-0 left-0 bg-primary transition-all duration-500 ease-out"
-                style={{ width: `${overallPct}%` }}
-              />
-              <span className="absolute -top-1 -left-px w-px h-3 bg-primary" />
-              <span className="absolute -top-1 right-0 w-px h-3 bg-border-strong" />
-            </div>
-            <span className="font-mono num text-[10px] tracking-wider2 text-muted-foreground shrink-0 uppercase">
-              {pagesTotal > 0 ? `${pagesDone.toString().padStart(2, "0")} / ${pagesTotal.toString().padStart(2, "0")} pages` : "…"}
-            </span>
-            <span className="font-mono num text-[10px] text-primary shrink-0 w-9 text-right">{overallPct}%</span>
-          </div>
-          <span className="absolute inset-0 pointer-events-none scanline" />
-        </div>
+        <ProgressPanel
+          status={overallStatus}
+          pagesDone={pagesDone}
+          pagesStarted={pagesStarted}
+          pagesTotal={pagesTotal}
+          legendStatus={job.legendStatus}
+          overallPct={overallPct}
+          elapsedSec={elapsedSec}
+        />
       )}
 
       <div className="flex-1 min-h-0 flex">
@@ -450,6 +435,168 @@ function PageViewer({
           </div>
         </TransformComponent>
       </TransformWrapper>
+    </div>
+  );
+}
+
+function ProgressPanel({
+  status, pagesDone, pagesStarted, pagesTotal, legendStatus, overallPct, elapsedSec,
+}: {
+  status: JobResult["status"];
+  pagesDone: number;
+  pagesStarted: number;
+  pagesTotal: number;
+  legendStatus?: JobResult["legendStatus"];
+  overallPct: number;
+  elapsedSec: number;
+}) {
+  // Phase model:
+  //  upload (already done by the time this view exists)
+  //  pages  — running while pagesDone < pagesTotal
+  //  legend — running until legendStatus is "done" or "error"
+  //  finalize — running once both pages + legend are settled
+  const pagesPhase: "active" | "done" =
+    pagesTotal > 0 && pagesDone === pagesTotal ? "done" : "active";
+  const legendPhase: "pending" | "active" | "done" | "error" =
+    legendStatus === "done"
+      ? "done"
+      : legendStatus === "error"
+      ? "error"
+      : pagesStarted + pagesDone === 0
+      ? "pending"
+      : "active";
+  const finalizePhase: "pending" | "active" | "done" =
+    pagesPhase === "done" && (legendPhase === "done" || legendPhase === "error")
+      ? "active"
+      : "pending";
+
+  // Typical job ETAs. Hobby plan: ~70s typical, 90-100s worst case.
+  const TARGET_SEC = 70;
+  const remainingSec = Math.max(0, Math.round(TARGET_SEC * (1 - overallPct / 100)));
+  const minsElapsed = Math.floor(elapsedSec / 60);
+  const secsElapsed = Math.floor(elapsedSec % 60);
+
+  // Friendly activity text — picks the most current "thing happening now"
+  let activity = "Spinning up workers…";
+  if (status === "queued") {
+    activity = "Allocating compute…";
+  } else if (pagesStarted === 0 && pagesDone === 0) {
+    activity = "Warming up — first cold start is the slowest";
+  } else if (pagesDone < pagesTotal) {
+    activity = `Reading page${pagesStarted > 1 ? "s" : ""} ${pagesStarted} in parallel · ${pagesDone} of ${pagesTotal} complete`;
+  } else if (legendPhase === "active") {
+    activity = "Reading the schedule with Claude vision…";
+  } else if (finalizePhase === "active") {
+    activity = "Cross-referencing detections against the schedule…";
+  }
+
+  return (
+    <div className="relative border-b border-border bg-surface shrink-0 overflow-hidden">
+      {/* Phase stepper */}
+      <div className="flex items-stretch border-b border-border/70">
+        <Phase label="Upload" sub="received" state="done" />
+        <PhaseConnector active />
+        <Phase
+          label="OCR pages"
+          sub={pagesTotal > 0 ? `${pagesDone}/${pagesTotal}` : "—"}
+          state={pagesPhase === "done" ? "done" : "active"}
+        />
+        <PhaseConnector active={legendPhase !== "pending"} />
+        <Phase
+          label="Schedule"
+          sub={
+            legendPhase === "done"
+              ? "extracted"
+              : legendPhase === "error"
+              ? "regex only"
+              : legendPhase === "active"
+              ? "reading"
+              : "waiting"
+          }
+          state={legendPhase === "done" ? "done" : legendPhase === "error" ? "error" : legendPhase === "active" ? "active" : "pending"}
+        />
+        <PhaseConnector active={finalizePhase !== "pending"} />
+        <Phase
+          label="Finalize"
+          sub={finalizePhase === "active" ? "merging" : "waiting"}
+          state={finalizePhase === "active" ? "active" : "pending"}
+          last
+        />
+      </div>
+
+      {/* Progress bar + activity + timer */}
+      <div className="px-4 py-3 space-y-2 relative">
+        <div className="flex items-center gap-4 text-xs">
+          <div className="flex-1 min-w-0">
+            <p className="font-medium text-foreground truncate">{activity}</p>
+          </div>
+          <span className="font-mono text-[10px] uppercase tracking-wider2 text-muted-foreground num shrink-0">
+            {minsElapsed}:{secsElapsed.toString().padStart(2, "0")} elapsed
+            {remainingSec > 0 && overallPct >= 5 && (
+              <>
+                <span className="mx-1.5 text-border-strong">·</span>
+                ~{remainingSec}s left
+              </>
+            )}
+          </span>
+          <span className="font-mono num text-[11px] text-primary shrink-0 w-9 text-right">{overallPct}%</span>
+        </div>
+
+        <div className="relative h-1 bg-border rounded-full overflow-hidden">
+          <div
+            className="absolute inset-y-0 left-0 bg-primary transition-all duration-700 ease-out"
+            style={{ width: `${overallPct}%` }}
+          />
+          <div className="absolute inset-y-0 left-0 bg-primary/40 transition-all duration-300 blur-sm"
+            style={{ width: `${overallPct}%` }} />
+        </div>
+      </div>
+      <span className="absolute inset-x-0 bottom-0 h-px pointer-events-none scanline" />
+    </div>
+  );
+}
+
+function Phase({
+  label, sub, state, last,
+}: {
+  label: string;
+  sub: string;
+  state: "done" | "active" | "pending" | "error";
+  last?: boolean;
+}) {
+  const dot =
+    state === "done"
+      ? "bg-success border-success"
+      : state === "active"
+      ? "bg-primary border-primary animate-pulse-soft"
+      : state === "error"
+      ? "bg-destructive border-destructive"
+      : "bg-transparent border-border-strong";
+  return (
+    <div className={cn("flex-1 px-4 py-2.5 flex items-center gap-2.5 min-w-0", !last && "border-r border-border/70")}>
+      <span className={cn("size-2.5 rounded-full border-2 shrink-0 transition-colors", dot)} />
+      <div className="min-w-0">
+        <div className="font-mono text-[10px] uppercase tracking-wider2 text-foreground truncate">
+          {label}
+        </div>
+        <div className={cn(
+          "text-[10px] truncate font-mono",
+          state === "done" ? "text-success"
+            : state === "active" ? "text-primary"
+            : state === "error" ? "text-destructive"
+            : "text-muted-foreground",
+        )}>
+          {sub}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PhaseConnector({ active }: { active: boolean }) {
+  return (
+    <div className="w-6 flex items-center justify-center">
+      <span className={cn("h-px w-full transition-colors", active ? "bg-primary" : "bg-border")} />
     </div>
   );
 }

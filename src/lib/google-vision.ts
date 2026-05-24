@@ -6,10 +6,14 @@ import os from "node:os";
 import type { ImageAnnotatorClient } from "@google-cloud/vision";
 import type { RawHit } from "./types";
 
-const NORMALIZE: Record<string, string> = { "—": "-", "–": "-" };
+const NORMALIZE: Record<string, string> = { "—": "-", "–": "-", "‐": "-", "‒": "-", "−": "-" };
 function normalize(s: string): string {
   let out = "";
   for (const ch of s) out += NORMALIZE[ch] ?? ch;
+  // Collapse runs of hyphens (e.g. "LF7--8" from a long PDF dash mis-OCRed
+  // as two ASCII hyphens) into a single hyphen so the canonical code-shape
+  // regex catches it.
+  out = out.replace(/-{2,}/g, "-");
   return out.trim();
 }
 
