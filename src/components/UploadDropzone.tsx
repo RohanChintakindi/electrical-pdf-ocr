@@ -1,6 +1,8 @@
 "use client";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { upload } from "@vercel/blob/client";
+import { v4 as uuid } from "uuid";
 import { cn } from "@/lib/cn";
 import { Upload, FileText, Loader2 } from "lucide-react";
 
@@ -26,6 +28,20 @@ function pushRecent(item: RecentUpload) {
   localStorage.setItem(RECENT_KEY, JSON.stringify(next));
 }
 
+// Detects whether the server is running on Vercel (Blob mode) vs. local dev.
+// On Vercel, we use direct-to-Blob client upload to bypass the 4.5 MB function
+// body limit. On local, we use a multipart POST.
+async function detectBlobMode(): Promise<boolean> {
+  try {
+    const r = await fetch("/api/upload-mode", { cache: "no-store" });
+    if (!r.ok) return false;
+    const j = await r.json();
+    return !!j.blob;
+  } catch {
+    return false;
+  }
+}
+
 export default function UploadDropzone() {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -34,55 +50,59 @@ export default function UploadDropzone() {
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [recent, setRecent] = useState<RecentUpload[]>(() => loadRecent());
+  const [blobMode, setBlobMode] = useState<boolean | null>(null);
+
+  useEffect(() => { detectBlobMode().then(setBlobMode); }, []);
 
   const handleFile = useCallback(async (file: File) => {
     setError(null);
-    if (!/\.pdf$/i.test(file.name)) {
-      setError("Only .pdf files are accepted.");
-      return;
-    }
-    if (file.size > 50 * 1024 * 1024) {
-      setError(`File too large (max 50 MB, got ${(file.size / 1024 / 1024).toFixed(1)} MB).`);
-      return;
-    }
+    if (!/\.pdf$/i.test(file.name)) { setError("Only .pdf files are accepted."); return; }
+    if (file.size > 50 * 1024 * 1024) { setError(`File too large (max 50 MB, got ${(file.size / 1024 / 1024).toFixed(1)} MB).`); return; }
     setUploading(true);
     setProgress(0);
     try {
-      const form = new FormData();
-      form.append("file", file);
-      const xhr = new XMLHttpRequest();
-      const done = new Promise<{ jobId: string }>((resolve, reject) => {
-        xhr.upload.addEventListener("progress", (e) => {
-          if (e.lengthComputable) setProgress((e.loaded / e.total) * 100);
+      const useBlob = blobMode ?? await detectBlobMode();
+      let jobId: string;
+      if (useBlob) {
+        jobId = uuid();
+        const pathname = `jobs/${jobId}/source.pdf`;
+        await upload(pathname, file, {
+          access: "public",
+          handleUploadUrl: "/api/upload",
+          contentType: "application/pdf",
+          clientPayload: JSON.stringify({ jobId, pdfName: file.name }),
+          onUploadProgress: (e) => setProgress(e.percentage),
         });
-        xhr.addEventListener("load", () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            try {
-              resolve(JSON.parse(xhr.responseText));
-            } catch (e) {
-              reject(new Error("Bad server response"));
+      } else {
+        const form = new FormData();
+        form.append("file", file);
+        const xhr = new XMLHttpRequest();
+        const done = new Promise<{ jobId: string }>((resolve, reject) => {
+          xhr.upload.addEventListener("progress", (e) => {
+            if (e.lengthComputable) setProgress((e.loaded / e.total) * 100);
+          });
+          xhr.addEventListener("load", () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              try { resolve(JSON.parse(xhr.responseText)); } catch { reject(new Error("Bad server response")); }
+            } else {
+              try { reject(new Error(JSON.parse(xhr.responseText).error ?? "Upload failed")); } catch { reject(new Error(`Upload failed (${xhr.status})`)); }
             }
-          } else {
-            try {
-              reject(new Error(JSON.parse(xhr.responseText).error ?? "Upload failed"));
-            } catch {
-              reject(new Error(`Upload failed (${xhr.status})`));
-            }
-          }
+          });
+          xhr.addEventListener("error", () => reject(new Error("Network error")));
+          xhr.open("POST", "/api/upload");
+          xhr.send(form);
         });
-        xhr.addEventListener("error", () => reject(new Error("Network error")));
-        xhr.open("POST", "/api/upload");
-        xhr.send(form);
-      });
-      const { jobId } = await done;
+        const r = await done;
+        jobId = r.jobId;
+      }
       pushRecent({ jobId, pdfName: file.name, uploadedAt: new Date().toISOString() });
       setRecent(loadRecent());
       router.push(`/results/${jobId}`);
     } catch (e: any) {
-      setError(e.message);
+      setError(e.message ?? "Upload failed");
       setUploading(false);
     }
-  }, [router]);
+  }, [router, blobMode]);
 
   const onDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();

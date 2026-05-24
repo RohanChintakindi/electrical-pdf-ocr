@@ -49,7 +49,9 @@ export async function getJson<T>(pathname: string): Promise<T | null> {
     }
   }
   const { list } = await import("@vercel/blob");
-  const { blobs } = await list({ prefix: pathname, limit: 1 });
+  // result.json is overwritten each time → cache-buster via random suffix would
+  // bloat the index. We just list newest-first and pick the matching pathname.
+  const { blobs } = await list({ prefix: pathname, limit: 10 });
   const match = blobs.find((b) => b.pathname === pathname);
   if (!match) return null;
   const resp = await fetch(match.url, { cache: "no-store" });
@@ -57,9 +59,15 @@ export async function getJson<T>(pathname: string): Promise<T | null> {
   return (await resp.json()) as T;
 }
 
-export async function getBytes(pathname: string): Promise<Buffer | null> {
+export async function getBytes(pathnameOrUrl: string): Promise<Buffer | null> {
+  // Absolute URL (Vercel Blob direct upload returns a full https:// URL)
+  if (/^https?:\/\//i.test(pathnameOrUrl)) {
+    const resp = await fetch(pathnameOrUrl, { cache: "no-store" });
+    if (!resp.ok) return null;
+    return Buffer.from(await resp.arrayBuffer());
+  }
   if (isLocal()) {
-    const full = path.join(LOCAL_DIR, pathname);
+    const full = path.join(LOCAL_DIR, pathnameOrUrl);
     try {
       return await fs.readFile(full);
     } catch {
@@ -67,8 +75,8 @@ export async function getBytes(pathname: string): Promise<Buffer | null> {
     }
   }
   const { list } = await import("@vercel/blob");
-  const { blobs } = await list({ prefix: pathname, limit: 1 });
-  const match = blobs.find((b) => b.pathname === pathname);
+  const { blobs } = await list({ prefix: pathnameOrUrl, limit: 1 });
+  const match = blobs.find((b) => b.pathname === pathnameOrUrl);
   if (!match) return null;
   const resp = await fetch(match.url, { cache: "no-store" });
   if (!resp.ok) return null;
