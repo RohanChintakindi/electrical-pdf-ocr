@@ -1,0 +1,8 @@
+.local-blob/
+scripts/
+docs/
+.git/
+.next/
+node_modules/
+*.log
+.env*
